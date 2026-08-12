@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Bhabhi Thulla Matchmaking</title>
+
+    <style>
+        body {
+            font-family: Arial;
+            background: #111;
+            color: white;
+            text-align: center;
+            padding-top: 40px;
+        }
+
+        .player {
+            background: #222;
+            margin: 10px auto;
+            padding: 20px;
+            width: 350px;
+            border-radius: 10px;
+        }
+
+        button {
+            padding: 12px 25px;
+            margin-top: 10px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        #queue {
+            font-size: 28px;
+            margin-top: 30px;
+        }
+
+        #status {
+            margin-top: 20px;
+            font-size: 20px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>🃏 Bhabhi Thulla</h1>
+
+    <h2>Matchmaking Test</h2>
+
+    <div class="player">
+
+        <h2 id="playerName">Not Connected</h2>
+
+        <button onclick="startMatch()">
+            START MATCH
+        </button>
+
+    </div>
+
+    <div id="queue">
+        Match Finding: 0 / 4
+    </div>
+
+    <div id="status">
+        Connecting...
+    </div>
+
+    <script src="http://localhost:3000/socket.io/socket.io.js"></script>
+
+    <script>
+
+        const socket = io("http://localhost:3000");
+
+        // =================================
+        // CHANGE THIS FOR EACH TAB
+        // =================================
+
+        const userId = "user_3";
+        const name = "Rahul";
+
+
+        // =================================
+        // CONNECT
+        // =================================
+
+        socket.on("connect", () => {
+
+            console.log("Connected!");
+            console.log("Socket ID:", socket.id);
+
+            document.getElementById("playerName").innerText =
+                name;
+
+            document.getElementById("status").innerText =
+                "Online";
+
+            // Join game
+            socket.emit("join_game", {
+                userId: userId,
+                name: name
+            });
+
+        });
+
+
+        // =================================
+        // START MATCH
+        // =================================
+
+        function startMatch() {
+
+            console.log("Start match clicked");
+
+            socket.emit("find_match");
+
+            document.getElementById("status").innerText =
+                "Finding Match...";
+
+        }
+
+
+        // =================================
+        // MATCH STATUS
+        // =================================
+
+        socket.on("match_status", (data) => {
+
+            console.log("Match status:", data);
+
+            document.getElementById("queue").innerText =
+                `Match Finding: ${data.players} / ${data.requiredPlayers}`;
+
+        });
+
+
+        // =================================
+        // MATCH STARTED
+        // =================================
+
+        socket.on("match_started", (data) => {
+
+            console.log("MATCH STARTED!");
+            console.log(data);
+
+            document.getElementById("queue").innerText =
+                "🎮 MATCH STARTED";
+
+            document.getElementById("status").innerText =
+                "Room: " + data.roomId;
+
+        });
+
+
+        // =================================
+        // DISCONNECT
+        // =================================
+
+        socket.on("disconnect", () => {
+
+            document.getElementById("status").innerText =
+                "Disconnected";
+
+        });
+
+    </script>
+
+</body>
+
+</html>
