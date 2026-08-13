@@ -17,7 +17,8 @@
             background: #222;
             margin: 10px auto;
             padding: 20px;
-            width: 350px;
+            width: 90%;
+            max-width: 700px;
             border-radius: 10px;
         }
 
@@ -37,6 +38,59 @@
             margin-top: 20px;
             font-size: 20px;
         }
+
+        /* =========================
+           CARDS
+        ========================= */
+
+        #cardsContainer {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 12px;
+            margin-top: 25px;
+        }
+
+        .card {
+            width: 80px;
+            height: 110px;
+            background: white;
+            color: black;
+            border-radius: 8px;
+
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+
+            font-size: 25px;
+            font-weight: bold;
+
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+        }
+
+        .rank {
+            font-size: 25px;
+        }
+
+        .suit {
+            font-size: 32px;
+            margin-top: 5px;
+        }
+
+        .red {
+            color: red;
+        }
+
+        .black {
+            color: black;
+        }
+
+        #cardCount {
+            margin-top: 15px;
+            font-size: 18px;
+            color: #aaa;
+        }
     </style>
 </head>
 
@@ -48,7 +102,9 @@
 
     <div class="player">
 
-        <h2 id="playerName">Not Connected</h2>
+        <h2 id="playerName">
+            Not Connected
+        </h2>
 
         <button onclick="startMatch()">
             START MATCH
@@ -56,19 +112,42 @@
 
     </div>
 
+
     <div id="queue">
         Match Finding: 0 / 4
     </div>
+
 
     <div id="status">
         Connecting...
     </div>
 
+
+    <!-- =========================
+         MY CARDS
+    ========================= -->
+
+    <div class="player">
+
+        <h2>🃏 My Cards</h2>
+
+        <div id="cardCount">
+            No cards received
+        </div>
+
+        <div id="cardsContainer">
+        </div>
+
+    </div>
+
+
     <script src="http://localhost:3000/socket.io/socket.io.js"></script>
+
 
     <script>
 
         const socket = io("http://localhost:3000");
+
 
         // =================================
         // CHANGE THIS FOR EACH TAB
@@ -87,16 +166,23 @@
             console.log("Connected!");
             console.log("Socket ID:", socket.id);
 
+
             document.getElementById("playerName").innerText =
                 name;
+
 
             document.getElementById("status").innerText =
                 "Online";
 
+
             // Join game
+
             socket.emit("join_game", {
+
                 userId: userId,
+
                 name: name
+
             });
 
         });
@@ -110,7 +196,9 @@
 
             console.log("Start match clicked");
 
+
             socket.emit("find_match");
+
 
             document.getElementById("status").innerText =
                 "Finding Match...";
@@ -124,7 +212,11 @@
 
         socket.on("match_status", (data) => {
 
-            console.log("Match status:", data);
+            console.log(
+                "Match status:",
+                data
+            );
+
 
             document.getElementById("queue").innerText =
                 `Match Finding: ${data.players} / ${data.requiredPlayers}`;
@@ -139,15 +231,200 @@
         socket.on("match_started", (data) => {
 
             console.log("MATCH STARTED!");
+
             console.log(data);
+
 
             document.getElementById("queue").innerText =
                 "🎮 MATCH STARTED";
 
+
             document.getElementById("status").innerText =
                 "Room: " + data.roomId;
 
+
+            console.log(
+                "My Seat:",
+                data.yourSeat
+            );
+
+
+            console.log(
+                "Players:",
+                data.players
+            );
+
         });
+
+
+        // =================================
+        // YOUR CARDS
+        // =================================
+
+        socket.on("your_cards", (data) => {
+
+            console.log(
+                "MY CARDS:",
+                data.cards
+            );
+
+
+            displayCards(data.cards);
+
+        });
+
+
+        // =================================
+        // DISPLAY CARDS
+        // =================================
+
+        function displayCards(cards) {
+
+            const container =
+                document.getElementById(
+                    "cardsContainer"
+                );
+
+
+            const count =
+                document.getElementById(
+                    "cardCount"
+                );
+
+
+            // Clear old cards
+
+            container.innerHTML = "";
+
+
+            // Card count
+
+            count.innerText =
+                "Cards: " + cards.length;
+
+
+            // Create every card
+
+            cards.forEach((card) => {
+
+                const cardElement =
+                    document.createElement("div");
+
+
+                cardElement.className =
+                    "card";
+
+
+                // Rank
+
+                const rank =
+                    document.createElement("div");
+
+                rank.className =
+                    "rank";
+
+
+                rank.innerText =
+                    getRankName(card.rank);
+
+
+                // Suit
+
+                const suit =
+                    document.createElement("div");
+
+                suit.className =
+                    "suit";
+
+
+                suit.innerText =
+                    getSuitSymbol(card.suit);
+
+
+                // Red / Black
+
+                if (
+                    card.suit === "hearts" ||
+                    card.suit === "diamonds"
+                ) {
+
+                    cardElement.classList.add("red");
+
+                } else {
+
+                    cardElement.classList.add("black");
+
+                }
+
+
+                cardElement.appendChild(rank);
+
+                cardElement.appendChild(suit);
+
+
+                container.appendChild(
+                    cardElement
+                );
+
+            });
+
+        }
+
+
+        // =================================
+        // RANK
+        // =================================
+
+        function getRankName(rank) {
+
+            switch (rank) {
+
+                case 1:
+                    return "A";
+
+                case 11:
+                    return "J";
+
+                case 12:
+                    return "Q";
+
+                case 13:
+                    return "K";
+
+                default:
+                    return rank;
+
+            }
+
+        }
+
+
+        // =================================
+        // SUIT
+        // =================================
+
+        function getSuitSymbol(suit) {
+
+            switch (suit) {
+
+                case "spades":
+                    return "♠";
+
+                case "hearts":
+                    return "♥";
+
+                case "diamonds":
+                    return "♦";
+
+                case "clubs":
+                    return "♣";
+
+                default:
+                    return suit;
+
+            }
+
+        }
 
 
         // =================================

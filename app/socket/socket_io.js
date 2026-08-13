@@ -3,6 +3,8 @@ import { Server } from "socket.io";
 import onlinePlayers from "../data/online_players.js";
 import matchmakingQueue from "../data/matchmaking_queue.js";
 import rooms from "../data/game_rooms.js";
+import { createDeck, shuffleDeck } from "../game/cards.js";
+
 export const initSocketIO = (server) => {
   const io = new Server(server, {
     cors: {
@@ -93,7 +95,10 @@ export const initSocketIO = (server) => {
         console.log("Room ID:", roomId);
         console.log("Room Players:", roomPlayers);
 
-        // Create players with seats
+        // =========================
+        // CREATE PLAYERS + SEATS
+        // =========================
+
         const players = roomPlayers.map((userId, index) => {
           const player = onlinePlayers.get(userId);
 
@@ -102,14 +107,78 @@ export const initSocketIO = (server) => {
             name: player.name,
             socketId: player.socketId,
             seat: index,
+            cards: [],
           };
         });
 
-        // Create room
+        // =========================
+        // CREATE + SHUFFLE DECK
+        // =========================
+
+        const deck = createDeck();
+
+        shuffleDeck(deck);
+
+        console.log("Total cards:", deck.length);
+
+        // =========================
+        // DEAL 13 CARDS TO EACH PLAYER
+        // =========================
+
+        for (let i = 0; i < players.length; i++) {
+          players[i].cards = deck.slice(
+            i * 13,
+            (i + 1) * 13,
+          );
+        }
+
+        // Check cards
+        console.log("Cards distributed:");
+
+        for (const player of players) {
+          console.log(
+            `${player.name} | Seat: ${player.seat} | Cards: ${player.cards.length}`,
+          );
+        }
+
+        // =========================
+        // FIND 1 OF SPADES
+        // =========================
+
+        let startingSeat = null;
+
+        for (const player of players) {
+          const hasStartingCard = player.cards.some(
+            (card) =>
+              card.rank === 1 &&
+              card.suit === "spades",
+          );
+
+          if (hasStartingCard) {
+            startingSeat = player.seat;
+
+            console.log(
+              `1 of Spades belongs to ${player.name}`,
+            );
+
+            break;
+          }
+        }
+
+        console.log(
+          `Starting turn seat: ${startingSeat}`,
+        );
+
+        // =========================
+        // CREATE ROOM
+        // =========================
+
         const room = {
           roomId: roomId,
           players: players,
-          status: "waiting",
+          status: "playing",
+          currentTurn: startingSeat,
+          tableCards: [],
         };
 
         // Save room
@@ -118,7 +187,10 @@ export const initSocketIO = (server) => {
         console.log("Room created:");
         console.log(room);
 
-        // Send room information to each player
+        // =========================
+        // JOIN PLAYERS + SEND DATA
+        // =========================
+
         for (const player of players) {
           const playerSocket = io.sockets.sockets.get(
             player.socketId,
@@ -131,7 +203,10 @@ export const initSocketIO = (server) => {
           // Join Socket.IO room
           playerSocket.join(roomId);
 
-          // Send player his seat
+          // =========================
+          // PUBLIC ROOM DATA
+          // =========================
+
           playerSocket.emit("match_started", {
             roomId: roomId,
             yourUserId: player.userId,
@@ -143,16 +218,196 @@ export const initSocketIO = (server) => {
               seat: p.seat,
             })),
           });
+
+          // =========================
+          // PRIVATE CARDS
+          // =========================
+
+          playerSocket.emit("your_cards", {
+            cards: player.cards,
+          });
         }
+
+        // =========================
+        // INITIAL TURN
+        // =========================
+
+        io.to(roomId).emit("turn_changed", {
+          roomId: roomId,
+          currentTurn: startingSeat,
+        });
 
         console.log("=================================");
         console.log("MATCH STARTED!");
         console.log("Room:", roomId);
-        console.log("Players:", players);
+        console.log("Starting Seat:", startingSeat);
         console.log("Queue after match:", matchmakingQueue);
         console.log("=================================");
       }
     });
+
+    // =========================
+    // PLAY CARD
+    // =========================
+    socket.on("play_card", (data) => {
+      const { roomId, userId, card, } = data;
+
+      console.log("Player wants to play card:");
+      console.log(data);
+
+      // =========================
+      // CHECK ROOM
+      // =========================
+
+      const room = rooms.get(roomId);
+
+      if (!room) {
+        socket.emit("play_card_error", {
+          message: "Room not found",
+        });
+
+        return;
+      }
+
+      // =========================
+      // FIND PLAYER
+      // =========================
+
+      const player = room.players.find(
+        (p) => p.userId === userId,
+      );
+
+      if (!player) {
+        socket.emit("play_card_error", {
+          message: "Player is not in this room",
+        });
+
+        return;
+      }
+
+      // =========================
+      // CHECK SOCKET
+      // =========================
+
+      if (player.socketId !== socket.id) {
+        socket.emit("play_card_error", {
+          message: "Invalid player socket",
+        });
+
+        return;
+      }
+
+      // =========================
+      // CHECK TURN
+      // =========================
+
+      if (room.currentTurn !== player.seat) {
+        socket.emit("play_card_error", {
+          message: "Not your turn",
+        });
+
+        console.log(
+          `${player.name} tried to play but it is not their turn`,
+        );
+
+        return;
+      }
+
+      // =========================
+      // CHECK CARD
+      // =========================
+
+      const cardIndex = player.cards.findIndex(
+        (c) =>
+          c.rank === card.rank &&
+          c.suit === card.suit,
+      );
+
+      if (cardIndex === -1) {
+        socket.emit("play_card_error", {
+          message: "You do not have this card",
+        });
+
+        return;
+      }
+
+      // =========================
+      // REMOVE CARD FROM HAND
+      // =========================
+
+      const playedCard =
+        player.cards.splice(cardIndex, 1)[0];
+
+      console.log(
+        `${player.name} played:`,
+        playedCard,
+      );
+
+      // =========================
+      // SAVE TABLE CARD
+      // =========================
+
+      if (!room.tableCards) {
+        room.tableCards = [];
+      }
+
+      room.tableCards.push({
+        userId: player.userId,
+        seat: player.seat,
+        card: playedCard,
+      });
+
+      // =========================
+      // NEXT TURN
+      // =========================
+
+      const currentIndex =
+        room.players.findIndex(
+          (p) => p.seat === room.currentTurn,
+        );
+
+      const nextIndex =
+        (currentIndex + 1) %
+        room.players.length;
+
+      room.currentTurn =
+        room.players[nextIndex].seat;
+
+      // =========================
+      // UPDATE ROOM
+      // =========================
+
+      rooms.set(roomId, room);
+
+      // =========================
+      // SEND TABLE CARD
+      // =========================
+
+      io.to(roomId).emit("card_played", {
+        roomId: roomId,
+
+        userId: player.userId,
+
+        seat: player.seat,
+
+        card: playedCard,
+      });
+
+      // =========================
+      // SEND NEXT TURN
+      // =========================
+
+      io.to(roomId).emit("turn_changed", {
+        roomId: roomId,
+
+        currentTurn: room.currentTurn,
+      });
+
+      console.log(
+        `Next turn: Seat ${room.currentTurn}`,
+      );
+    });
+
 
     // =========================
     // DISCONNECT
