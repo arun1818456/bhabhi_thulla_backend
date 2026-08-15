@@ -26,11 +26,9 @@ export const initSocketIO = (server) => {
         userId,
         name,
         socketId: socket.id,
-        status: "online",
       });
 
-      console.log("Player joined:");
-      console.log(onlinePlayers);
+      console.log(`Player joined: --${name}-- ${onlinePlayers.length} online`);
     });
 
     // =========================
@@ -70,8 +68,7 @@ export const initSocketIO = (server) => {
       // Add player
       matchmakingQueue.push(currentUserId);
 
-      console.log("Matchmaking Queue:");
-      console.log(matchmakingQueue);
+      console.log(`Matchmaking Queue: ${matchmakingQueue.length} players`);
 
       // Send queue status to everyone
       io.emit("match_status", {
@@ -93,7 +90,7 @@ export const initSocketIO = (server) => {
         const roomId = `room_${Date.now()}`;
 
         console.log("Room ID:", roomId);
-        console.log("Room Players:", roomPlayers);
+        console.log(`Room Players: ${roomPlayers.length}`);
 
         // =========================
         // CREATE PLAYERS + SEATS
@@ -360,6 +357,40 @@ export const initSocketIO = (server) => {
       // =========================
       // NEXT TURN
       // =========================
+      // =========================
+      // CHECK 4 CARDS
+      // =========================
+
+      if (room.tableCards.length === 4) {
+
+        console.log("4 CARDS COMPLETED");
+
+        // 2 seconds wait
+        setTimeout(() => {
+
+          // Room dobara check
+          const currentRoom = rooms.get(roomId);
+
+          if (!currentRoom) {
+            return;
+          }
+
+          // Clear table cards
+          currentRoom.tableCards = [];
+
+          // Save updated room
+          rooms.set(roomId, currentRoom);
+
+          console.log("Table cards cleared");
+
+          // Tell only this room
+          io.to(roomId).emit("table_cleared", {
+            roomId: roomId,
+          });
+
+        }, 2000);
+      }
+
 
       const currentIndex =
         room.players.findIndex(

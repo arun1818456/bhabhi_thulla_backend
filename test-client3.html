@@ -40,7 +40,7 @@
         }
 
         /* =========================
-           CARDS
+           MY CARDS
         ========================= */
 
         #cardsContainer {
@@ -67,6 +67,27 @@
             font-weight: bold;
 
             box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+
+            cursor: pointer;
+
+            transition: 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-8px);
+        }
+
+        /* =========================
+           DISABLED CARD
+        ========================= */
+
+        .card.disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
+        .card.disabled:hover {
+            transform: none;
         }
 
         .rank {
@@ -91,6 +112,57 @@
             font-size: 18px;
             color: #aaa;
         }
+
+        /* =========================
+           TABLE
+        ========================= */
+
+        #tableCards {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 15px;
+
+            min-height: 130px;
+
+            margin-top: 25px;
+        }
+
+        .table-card {
+            width: 80px;
+            height: 110px;
+
+            background: white;
+            color: black;
+
+            border-radius: 8px;
+
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+
+            font-size: 25px;
+            font-weight: bold;
+
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+        }
+
+        .table-player {
+            font-size: 12px;
+            color: #555;
+            margin-top: 5px;
+        }
+
+        /* =========================
+           TURN
+        ========================= */
+
+        #turn {
+            margin-top: 15px;
+            font-size: 22px;
+            color: #00ff88;
+        }
     </style>
 </head>
 
@@ -99,6 +171,8 @@
     <h1>🃏 Bhabhi Thulla</h1>
 
     <h2>Matchmaking Test</h2>
+
+    <!-- PLAYER -->
 
     <div class="player">
 
@@ -112,20 +186,23 @@
 
     </div>
 
+    <!-- MATCH STATUS -->
 
     <div id="queue">
         Match Finding: 0 / 4
     </div>
 
-
     <div id="status">
         Connecting...
     </div>
 
+    <!-- TURN -->
 
-    <!-- =========================
-         MY CARDS
-    ========================= -->
+    <div id="turn">
+        Turn: Waiting...
+    </div>
+
+    <!-- MY CARDS -->
 
     <div class="player">
 
@@ -140,21 +217,50 @@
 
     </div>
 
+    <!-- TABLE CARDS -->
+
+    <div class="player">
+
+        <h2>🎴 Table</h2>
+
+        <div id="tableCards">
+            No card played
+        </div>
+
+    </div>
+
+    <!-- SOCKET.IO -->
 
     <script src="http://localhost:3000/socket.io/socket.io.js"></script>
 
-
     <script>
+
+        // =================================
+        // SOCKET
+        // =================================
 
         const socket = io("http://localhost:3000");
 
 
         // =================================
-        // CHANGE THIS FOR EACH TAB
+        // CHANGE THESE FOR EACH TAB
         // =================================
 
         const userId = "user_3";
-        const name = "Rahul";
+        const name = "ccccc";
+
+
+        // =================================
+        // GAME VARIABLES
+        // =================================
+
+        let currentRoomId = null;
+
+        let mySeat = null;
+
+        let myCards = [];
+
+        let currentTurn = null;
 
 
         // =================================
@@ -164,15 +270,19 @@
         socket.on("connect", () => {
 
             console.log("Connected!");
-            console.log("Socket ID:", socket.id);
 
+            console.log(
+                "Socket ID:",
+                socket.id
+            );
 
-            document.getElementById("playerName").innerText =
-                name;
+            document.getElementById(
+                "playerName"
+            ).innerText = name;
 
-
-            document.getElementById("status").innerText =
-                "Online";
+            document.getElementById(
+                "status"
+            ).innerText = "Online";
 
 
             // Join game
@@ -194,13 +304,17 @@
 
         function startMatch() {
 
-            console.log("Start match clicked");
+            console.log(
+                "Start match clicked"
+            );
 
+            socket.emit(
+                "find_match"
+            );
 
-            socket.emit("find_match");
-
-
-            document.getElementById("status").innerText =
+            document.getElementById(
+                "status"
+            ).innerText =
                 "Finding Match...";
 
         }
@@ -210,72 +324,118 @@
         // MATCH STATUS
         // =================================
 
-        socket.on("match_status", (data) => {
+        socket.on(
+            "match_status",
+            (data) => {
 
-            console.log(
-                "Match status:",
-                data
-            );
+                console.log(
+                    "Match status:",
+                    data
+                );
 
+                document.getElementById(
+                    "queue"
+                ).innerText =
+                    `Match Finding: ${data.players} / ${data.requiredPlayers}`;
 
-            document.getElementById("queue").innerText =
-                `Match Finding: ${data.players} / ${data.requiredPlayers}`;
-
-        });
+            }
+        );
 
 
         // =================================
         // MATCH STARTED
         // =================================
 
-        socket.on("match_started", (data) => {
+        socket.on(
+            "match_started",
+            (data) => {
 
-            console.log("MATCH STARTED!");
+                console.log(
+                    "MATCH STARTED!"
+                );
 
-            console.log(data);
-
-
-            document.getElementById("queue").innerText =
-                "🎮 MATCH STARTED";
-
-
-            document.getElementById("status").innerText =
-                "Room: " + data.roomId;
+                console.log(data);
 
 
-            console.log(
-                "My Seat:",
-                data.yourSeat
-            );
+                // Save room
+
+                currentRoomId =
+                    data.roomId;
 
 
-            console.log(
-                "Players:",
-                data.players
-            );
+                // Save my seat
 
-        });
+                mySeat =
+                    data.yourSeat;
+
+
+                document.getElementById(
+                    "queue"
+                ).innerText =
+                    "🎮 MATCH STARTED";
+
+
+                document.getElementById(
+                    "status"
+                ).innerText =
+                    "Room: " + data.roomId;
+
+
+                console.log(
+                    "My User ID:",
+                    data.yourUserId
+                );
+
+
+                console.log(
+                    "My Seat:",
+                    mySeat
+                );
+
+
+                console.log(
+                    "Players:",
+                    data.players
+                );
+
+
+                // Render cards again
+                // according to current turn
+
+                displayCards(myCards);
+
+            }
+        );
 
 
         // =================================
         // YOUR CARDS
         // =================================
 
-        socket.on("your_cards", (data) => {
+        socket.on(
+            "your_cards",
+            (data) => {
 
-            console.log(
-                "MY CARDS:",
-                data.cards
-            );
+                console.log(
+                    "MY CARDS:",
+                    data.cards
+                );
 
 
-            displayCards(data.cards);
+                myCards =
+                    data.cards;
 
-        });
+
+                displayCards(
+                    myCards
+                );
+
+            }
+        );
 
 
         // =================================
-        // DISPLAY CARDS
+        // DISPLAY MY CARDS
         // =================================
 
         function displayCards(cards) {
@@ -300,75 +460,418 @@
             // Card count
 
             count.innerText =
-                "Cards: " + cards.length;
+                "Cards: " +
+                cards.length;
 
 
-            // Create every card
+            // Create cards
 
-            cards.forEach((card) => {
+            cards.forEach(
+                (card) => {
 
-                const cardElement =
-                    document.createElement("div");
-
-
-                cardElement.className =
-                    "card";
-
-
-                // Rank
-
-                const rank =
-                    document.createElement("div");
-
-                rank.className =
-                    "rank";
+                    const cardElement =
+                        document.createElement(
+                            "div"
+                        );
 
 
-                rank.innerText =
-                    getRankName(card.rank);
+                    cardElement.className =
+                        "card";
 
 
-                // Suit
+                    // Rank
 
-                const suit =
-                    document.createElement("div");
+                    const rank =
+                        document.createElement(
+                            "div"
+                        );
 
-                suit.className =
-                    "suit";
+                    rank.className =
+                        "rank";
+
+                    rank.innerText =
+                        getRankName(
+                            card.rank
+                        );
 
 
-                suit.innerText =
-                    getSuitSymbol(card.suit);
+                    // Suit
+
+                    const suit =
+                        document.createElement(
+                            "div"
+                        );
+
+                    suit.className =
+                        "suit";
+
+                    suit.innerText =
+                        getSuitSymbol(
+                            card.suit
+                        );
 
 
-                // Red / Black
+                    // Red / Black
+
+                    if (
+                        card.suit === "hearts" ||
+                        card.suit === "diamonds"
+                    ) {
+
+                        cardElement.classList.add(
+                            "red"
+                        );
+
+                    } else {
+
+                        cardElement.classList.add(
+                            "black"
+                        );
+
+                    }
+
+
+                    cardElement.appendChild(
+                        rank
+                    );
+
+                    cardElement.appendChild(
+                        suit
+                    );
+
+
+                    // =================================
+                    // TURN CHECK
+                    // =================================
+
+                    if (
+                        currentTurn === mySeat
+                    ) {
+
+                        // My turn
+                        // Card is clickable
+
+                        cardElement.onclick =
+                            function () {
+
+                                playCard(card);
+
+                            };
+
+                    } else {
+
+                        // Not my turn
+                        // Card disabled
+
+                        cardElement.classList.add(
+                            "disabled"
+                        );
+
+                    }
+
+
+                    container.appendChild(
+                        cardElement
+                    );
+
+                }
+            );
+
+        }
+
+
+        // =================================
+        // PLAY CARD
+        // =================================
+
+        function playCard(card) {
+
+            console.log(
+                "Card clicked:",
+                card
+            );
+
+
+            // Room check
+
+            if (!currentRoomId) {
+
+                console.log(
+                    "Room not available"
+                );
+
+                return;
+
+            }
+
+
+            // Extra frontend turn check
+
+            if (
+                currentTurn !== mySeat
+            ) {
+
+                console.log(
+                    "Not my turn!"
+                );
+
+                return;
+
+            }
+
+
+            // Send to backend
+
+            socket.emit(
+                "play_card",
+                {
+
+                    roomId:
+                        currentRoomId,
+
+                    userId:
+                        userId,
+
+                    card:
+                        card
+
+                }
+            );
+
+
+            console.log(
+                "play_card emitted"
+            );
+
+        }
+
+
+        // =================================
+        // CARD PLAYED
+        // SAME ROOM ONLY
+        // =================================
+
+        socket.on(
+            "card_played",
+            (data) => {
+
+                console.log(
+                    "CARD PLAYED:",
+                    data
+                );
+
+
+                showPlayedCard(
+                    data
+                );
+
+
+                // If this is MY card
+                // remove it from my hand
 
                 if (
-                    card.suit === "hearts" ||
-                    card.suit === "diamonds"
+                    data.userId === userId
                 ) {
 
-                    cardElement.classList.add("red");
+                    myCards =
+                        myCards.filter(
+                            (card) =>
+                                !(
+                                    card.rank ===
+                                        data.card.rank &&
+                                    card.suit ===
+                                        data.card.suit
+                                )
+                        );
 
-                } else {
 
-                    cardElement.classList.add("black");
+                    displayCards(
+                        myCards
+                    );
+
+                }
+
+            }
+        );
+
+
+        // =================================
+        // SHOW CARD ON TABLE
+        // =================================
+
+        function showPlayedCard(data) {
+
+            const container =
+                document.getElementById(
+                    "tableCards"
+                );
+
+
+            // Create card
+
+            const cardElement =
+                document.createElement(
+                    "div"
+                );
+
+
+            cardElement.className =
+                "table-card";
+
+
+            // Rank
+
+            const rank =
+                document.createElement(
+                    "div"
+                );
+
+            rank.innerText =
+                getRankName(
+                    data.card.rank
+                );
+
+
+            // Suit
+
+            const suit =
+                document.createElement(
+                    "div"
+                );
+
+            suit.innerText =
+                getSuitSymbol(
+                    data.card.suit
+                );
+
+
+            // Red / Black
+
+            if (
+                data.card.suit === "hearts" ||
+                data.card.suit === "diamonds"
+            ) {
+
+                cardElement.style.color =
+                    "red";
+
+            }
+
+
+            // Player info
+
+            const player =
+                document.createElement(
+                    "div"
+                );
+
+            player.className =
+                "table-player";
+
+
+            player.innerText =
+                "Seat " +
+                data.seat;
+
+
+            // Add
+
+            cardElement.appendChild(
+                rank
+            );
+
+            cardElement.appendChild(
+                suit
+            );
+
+            cardElement.appendChild(
+                player
+            );
+
+
+            container.appendChild(
+                cardElement
+            );
+
+        }
+
+
+        // =================================
+        // TURN CHANGED
+        // =================================
+
+        socket.on(
+            "turn_changed",
+            (data) => {
+
+                console.log(
+                    "TURN CHANGED:",
+                    data
+                );
+
+
+                currentTurn =
+                    data.currentTurn;
+
+
+                // Update turn text
+
+                document.getElementById(
+                    "turn"
+                ).innerText =
+                    "Turn: Seat " +
+                    currentTurn;
+
+
+                // If my turn
+
+                if (
+                    currentTurn === mySeat
+                ) {
+
+                    document.getElementById(
+                        "turn"
+                    ).innerText =
+                        "🔥 YOUR TURN";
 
                 }
 
 
-                cardElement.appendChild(rank);
+                // IMPORTANT:
+                // Re-render cards
+                // so only current player
+                // can click
 
-                cardElement.appendChild(suit);
-
-
-                container.appendChild(
-                    cardElement
+                displayCards(
+                    myCards
                 );
 
-            });
+            }
+        );
 
-        }
+
+        // =================================
+        // PLAY CARD ERROR
+        // =================================
+
+        socket.on(
+            "play_card_error",
+            (data) => {
+
+                console.log(
+                    "PLAY CARD ERROR:",
+                    data
+                );
+
+
+                document.getElementById(
+                    "status"
+                ).innerText =
+                    "❌ " +
+                    data.message;
+
+            }
+        );
 
 
         // =================================
@@ -431,12 +934,17 @@
         // DISCONNECT
         // =================================
 
-        socket.on("disconnect", () => {
+        socket.on(
+            "disconnect",
+            () => {
 
-            document.getElementById("status").innerText =
-                "Disconnected";
+                document.getElementById(
+                    "status"
+                ).innerText =
+                    "Disconnected";
 
-        });
+            }
+        );
 
     </script>
 
