@@ -1,7 +1,15 @@
 // ============================================================
 // ENVIRONMENT CONFIGURATION
 // ============================================================
+import dns from "node:dns/promises";
 
+dns.setServers([
+  "1.1.1.1",
+  "8.8.8.8",
+]);
+
+import dotenv from "dotenv";
+dotenv.config();
 
 // ============================================================
 // IMPORTS
@@ -10,6 +18,7 @@
 import express from "express";
 import http from "http";
 import cors from "cors";
+import { sendResponse } from "./app/utils/sendResposeType.js";
 // Database connection
 import  connectDB  from "./app/config/dbConnect.js";
 
@@ -69,7 +78,7 @@ app.use("/api/auth", userRoutes);
 app.post("/", (req, res) => {
   console.log("✅ API HIT");
 
-  res.status(200).send("Server is working!");
+  sendResponse(res, 200, true, "Server is working!", null);
 });
 
 

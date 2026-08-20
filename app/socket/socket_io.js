@@ -21,15 +21,14 @@ export const initSocketIO = (server) => {
     // =========================
     socket.on("join_game", (playerData) => {
       const { userId, name } = playerData;
-
+      console.log(`Player joined:---- ${name} (ID: ${userId})`);
       onlinePlayers.set(userId, {
         userId,
         name,
         socketId: socket.id,
       });
-
-      console.log(`Player joined: --${name}-- ${onlinePlayers.length} online`);
     });
+    
 
     // =========================
     // FIND MATCH
@@ -452,8 +451,7 @@ export const initSocketIO = (server) => {
           onlinePlayers.delete(userId);
 
           // Remove from matchmaking queue
-          const queueIndex =
-            matchmakingQueue.indexOf(userId);
+          const queueIndex = matchmakingQueue.indexOf(userId);
 
           if (queueIndex !== -1) {
             matchmakingQueue.splice(queueIndex, 1);
@@ -466,12 +464,6 @@ export const initSocketIO = (server) => {
           break;
         }
       }
-
-      console.log("Current online players:");
-      console.log(onlinePlayers);
-
-      console.log("Current matchmaking queue:");
-      console.log(matchmakingQueue);
     });
   });
 

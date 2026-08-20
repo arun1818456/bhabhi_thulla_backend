@@ -1,42 +1,18 @@
 import User from "./model.js";
 import { getUniqueGuestName } from "../../utils/getUniqueName.js";
-// import bcrypt from "bcryptjs";
-// import { getUniqueName } from "../../utils/getUniqueUserName.js";
-// import { jwtTokenGenerator } from "../../utils/generateJWTtoken.js";
-// import { sendResponse } from "../../utils/sendResposeType.js";
-// import { addExpenseWithoutLogging } from "../../utils/addExpenseWithoutLogging.js";
-// import Expense from "../expense/model.js";
-// import Notification from "../notifications/model.js";
-
+import { sendResponse } from "../../utils/sendResposeType.js";
 
 export const guestLogin = async (req, res) => {
-
     try {
         const { deviceId } = req.body;
         if (!deviceId) {
-            return res.status(400).json({
-                success: false,
-                message: "deviceId is required",
-            });
-
+            return sendResponse(res, 400, false, "deviceId is required", null);
         }
-
-        // =========================
-        // FIND EXISTING GUEST
-        // =========================
-
         let user = await User.findOne({
             deviceId: deviceId,
             loginType: "guest",
         });
-
-
-        // =========================
-        // CREATE NEW GUEST
-        // =========================
-
         if (!user) {
-
             const randomGuestName = await getUniqueGuestName();
             user = await User.create({
                 deviceId: deviceId,
@@ -47,48 +23,17 @@ export const guestLogin = async (req, res) => {
                 diamonds: 10,
                 createdAt: new Date(),
                 lastLoginAt: new Date(),
-
             });
 
         } else {
-
-            // Existing guest
-
-            user.lastLoginAt =
-                new Date();
-
+            user.lastLoginAt = new Date();
             await user.save();
-
         }
-
-
-        // =========================
-        // RESPONSE
-        // =========================
-
-        return res.json({
-            success: true,
-            data: user,
-            message:
-                "Guest login successful",
-
-        });
+        return sendResponse(res, 200, true, "Guest login successful", user);
 
     } catch (error) {
-
-        console.error(
-            "Guest login error:",
-            error
-        );
-
-        return res.status(500).json({
-
-            success: false,
-
-            message:
-                "Internal server error",
-
-        });
+        console.error("Error during guest login:", error);
+        return sendResponse(res, 500, false, "Error during guest login", null, error.message);
 
     }
 };
