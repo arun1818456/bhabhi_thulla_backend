@@ -1,4 +1,5 @@
 import User from "./model.js";
+import { getUniqueGuestName } from "../../utils/getUniqueName.js";
 // import bcrypt from "bcryptjs";
 // import { getUniqueName } from "../../utils/getUniqueUserName.js";
 // import { jwtTokenGenerator } from "../../utils/generateJWTtoken.js";
@@ -36,26 +37,15 @@ export const guestLogin = async (req, res) => {
 
         if (!user) {
 
-            const randomGuestName =await getUniqueGuestName();
-            const userId = generateGuestUserId();
-
+            const randomGuestName = await getUniqueGuestName();
             user = await User.create({
-
-                userId: userId,
-
                 deviceId: deviceId,
-
-                name:
-                  randomGuestName,
-
+                name: randomGuestName,
                 loginType: "guest",
-
-                avatar: 1,
-
+                avatar: "p1",
                 coins: 1000,
-
+                diamonds: 10,
                 createdAt: new Date(),
-
                 lastLoginAt: new Date(),
 
             });
@@ -77,25 +67,10 @@ export const guestLogin = async (req, res) => {
         // =========================
 
         return res.json({
-
             success: true,
-
-            user: {
-
-                userId: user.userId,
-
-                name: user.name,
-
-                loginType:
-                    user.loginType,
-
-                avatar:
-                    user.avatar,
-
-                coins:
-                    user.coins,
-
-            },
+            data: user,
+            message:
+                "Guest login successful",
 
         });
 

@@ -49,14 +49,3 @@ export const getUniqueGuestName = async () => {
     }
   }
 };
-
-export const generateGuestUserId = () => {
-  const timestamp = Date.now();
-  const randomNumber = Math.floor(1000 + Math.random() * 9000);
-
-  const randomString = Math.random()
-    .toString(36)
-    .substring(2, 8);
-
-  return `guest_${timestamp}_${randomNumber}_${randomString}`;
-};
