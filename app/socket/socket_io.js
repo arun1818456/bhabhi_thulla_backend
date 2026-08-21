@@ -27,14 +27,18 @@ export const initSocketIO = (server) => {
         name,
         socketId: socket.id,
       });
+      console.log("Online Players:", Array.from(onlinePlayers.values()).length);
     });
-    
+
 
     // =========================
     // FIND MATCH
     // =========================
-    socket.on("find_match", () => {
-      console.log("Player wants to find a match");
+    socket.on("find_match", (matchData) => {
+      const playersCount = matchData.playersCount || 4;
+      const entryFee = matchData.entryFee || 0;
+
+      console.log(`Find Match: ${playersCount} players, Entry: ${entryFee}`);
 
       let currentUserId = null;
 
@@ -46,199 +50,123 @@ export const initSocketIO = (server) => {
         }
       }
 
-      if (!currentUserId) {
-        console.log("Player not found!");
-        return;
+      if (!currentUserId) return;
+
+      // Queue key (4 players + 100 entry = separate queue)
+      const queueKey = `${playersCount}_${entryFee}`;
+
+      if (!matchmakingQueue.has(queueKey)) {
+        matchmakingQueue.set(queueKey, []);
       }
 
-      // Already searching?
-      if (matchmakingQueue.includes(currentUserId)) {
-        console.log("Player already in queue!");
+      const queue = matchmakingQueue.get(queueKey);
 
+      if (queue.includes(currentUserId)) {
         socket.emit("match_status", {
           status: "searching",
-          players: matchmakingQueue.length,
-          requiredPlayers: 4,
+          players: queue.length,
+          requiredPlayers: playersCount,
+          entryFee,
         });
-
         return;
       }
 
-      // Add player
-      matchmakingQueue.push(currentUserId);
+      queue.push(currentUserId);
 
-      console.log(`Matchmaking Queue: ${matchmakingQueue.length} players`);
-
-      // Send queue status to everyone
       io.emit("match_status", {
         status: "searching",
-        players: matchmakingQueue.length,
-        requiredPlayers: 4,
+        players: queue.length,
+        requiredPlayers: playersCount,
+        entryFee,
       });
 
-      // =========================
-      // MATCH FOUND
-      // =========================
-      if (matchmakingQueue.length === 4) {
-        console.log("=================================");
-        console.log("4 PLAYERS FOUND!");
-        console.log("=================================");
+      // Match complete
+      if (queue.length >= playersCount) {
+        const roomPlayers = queue.splice(0, playersCount);
 
-        const roomPlayers = matchmakingQueue.splice(0, 4);
+        const roomId = `room_${Date.now()}_${Math.random()
+          .toString(36)
+          .slice(2, 8)}`;
+        const deck = shuffleDeck(createDeck());
+        const cardsPerPlayer = Math.floor(deck.length / playersCount);
 
-        const roomId = `room_${Date.now()}`;
+        const players = roomPlayers
+          .map((userId, index) => {
+            const onlinePlayer = onlinePlayers.get(userId);
 
-        console.log("Room ID:", roomId);
-        console.log(`Room Players: ${roomPlayers.length}`);
+            if (!onlinePlayer) {
+              return null;
+            }
 
-        // =========================
-        // CREATE PLAYERS + SEATS
-        // =========================
+            return {
+              userId,
+              name: onlinePlayer.name,
+              socketId: onlinePlayer.socketId,
+              seat: index + 1,
+              cards: deck.splice(0, cardsPerPlayer),
+            };
+          })
+          .filter(Boolean);
 
-        const players = roomPlayers.map((userId, index) => {
-          const player = onlinePlayers.get(userId);
+        if (players.length !== playersCount) {
+          console.error(`Could not create ${roomId}: player disconnected.`);
 
-          return {
-            userId: userId,
-            name: player.name,
-            socketId: player.socketId,
-            seat: index,
-            cards: [],
-          };
-        });
+          for (const playerId of roomPlayers) {
+            if (onlinePlayers.has(playerId)) {
+              queue.push(playerId);
+            }
+          }
 
-        // =========================
-        // CREATE + SHUFFLE DECK
-        // =========================
-
-        const deck = createDeck();
-
-        shuffleDeck(deck);
-
-        console.log("Total cards:", deck.length);
-
-        // =========================
-        // DEAL 13 CARDS TO EACH PLAYER
-        // =========================
-
-        for (let i = 0; i < players.length; i++) {
-          players[i].cards = deck.slice(
-            i * 13,
-            (i + 1) * 13,
-          );
+          return;
         }
 
-        // Check cards
-        console.log("Cards distributed:");
+        const room = {
+          roomId,
+          players,
+          playersCount,
+          entryFee,
+          tableCards: [],
+          currentTurn: 1,
+          status: "started",
+          createdAt: new Date(),
+        };
 
-        for (const player of players) {
-          console.log(
-            `${player.name} | Seat: ${player.seat} | Cards: ${player.cards.length}`,
-          );
+        rooms.set(roomId, room);
+
+        if (queue.length === 0) {
+          matchmakingQueue.delete(queueKey);
         }
 
-        // =========================
-        // FIND 1 OF SPADES
-        // =========================
-
-        let startingSeat = null;
+        const publicPlayers = players.map(({ userId, name, seat }) => ({
+          userId,
+          name,
+          seat,
+        }));
 
         for (const player of players) {
-          const hasStartingCard = player.cards.some(
-            (card) =>
-              card.rank === 1 &&
-              card.suit === "spades",
-          );
+          const playerSocket = io.sockets.sockets.get(player.socketId);
 
-          if (hasStartingCard) {
-            startingSeat = player.seat;
-
-            console.log(
-              `1 of Spades belongs to ${player.name}`,
-            );
-
-            break;
+          if (playerSocket) {
+            playerSocket.join(roomId);
+            playerSocket.emit("match_started", {
+              roomId,
+              yourUserId: player.userId,
+              yourSeat: player.seat,
+              players: publicPlayers,
+              playersCount,
+              entryFee,
+              currentTurn: room.currentTurn,
+            });
+            playerSocket.emit("your_cards", {
+              roomId,
+              cards: player.cards,
+            });
           }
         }
 
         console.log(
-          `Starting turn seat: ${startingSeat}`,
+          `Room ${roomId} created with ${players.length} players.`,
         );
-
-        // =========================
-        // CREATE ROOM
-        // =========================
-
-        const room = {
-          roomId: roomId,
-          players: players,
-          status: "playing",
-          currentTurn: startingSeat,
-          tableCards: [],
-        };
-
-        // Save room
-        rooms.set(roomId, room);
-
-        console.log("Room created:");
-        console.log(room);
-
-        // =========================
-        // JOIN PLAYERS + SEND DATA
-        // =========================
-
-        for (const player of players) {
-          const playerSocket = io.sockets.sockets.get(
-            player.socketId,
-          );
-
-          if (!playerSocket) {
-            continue;
-          }
-
-          // Join Socket.IO room
-          playerSocket.join(roomId);
-
-          // =========================
-          // PUBLIC ROOM DATA
-          // =========================
-
-          playerSocket.emit("match_started", {
-            roomId: roomId,
-            yourUserId: player.userId,
-            yourSeat: player.seat,
-
-            players: players.map((p) => ({
-              userId: p.userId,
-              name: p.name,
-              seat: p.seat,
-            })),
-          });
-
-          // =========================
-          // PRIVATE CARDS
-          // =========================
-
-          playerSocket.emit("your_cards", {
-            cards: player.cards,
-          });
-        }
-
-        // =========================
-        // INITIAL TURN
-        // =========================
-
-        io.to(roomId).emit("turn_changed", {
-          roomId: roomId,
-          currentTurn: startingSeat,
-        });
-
-        console.log("=================================");
-        console.log("MATCH STARTED!");
-        console.log("Room:", roomId);
-        console.log("Starting Seat:", startingSeat);
-        console.log("Queue after match:", matchmakingQueue);
-        console.log("=================================");
       }
     });
 
@@ -450,11 +378,17 @@ export const initSocketIO = (server) => {
         if (player.socketId === socket.id) {
           onlinePlayers.delete(userId);
 
-          // Remove from matchmaking queue
-          const queueIndex = matchmakingQueue.indexOf(userId);
+          // Remove from all matchmaking queues
+          for (const [queueKey, queue] of matchmakingQueue.entries()) {
+            const queueIndex = queue.indexOf(userId);
 
-          if (queueIndex !== -1) {
-            matchmakingQueue.splice(queueIndex, 1);
+            if (queueIndex !== -1) {
+              queue.splice(queueIndex, 1);
+            }
+
+            if (queue.length === 0) {
+              matchmakingQueue.delete(queueKey);
+            }
           }
 
           console.log(
