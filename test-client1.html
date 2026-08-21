@@ -288,9 +288,7 @@
             // Join game
 
             socket.emit("join_game", {
-
                 userId: userId,
-
                 name: name
 
             });
@@ -309,7 +307,10 @@
             );
 
             socket.emit(
-                "find_match"
+                "find_match",
+                {
+                    "entryFee": 120,
+                }
             );
 
             document.getElementById(
@@ -678,9 +679,9 @@
                             (card) =>
                                 !(
                                     card.rank ===
-                                        data.card.rank &&
+                                    data.card.rank &&
                                     card.suit ===
-                                        data.card.suit
+                                    data.card.suit
                                 )
                         );
 
