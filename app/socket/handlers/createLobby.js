@@ -2,8 +2,10 @@ import matchLobbies from "../../data/match_lobbies.js";
 import { findUserIdBySocket } from "../../utils/getUserIdBySocket.js";
 import { getUser } from "../../utils/getUserDataById.js";
 
+const PLAYERS_COUNT = 4;
 
 export const handleCreateLobby = async (io, socket, data) => {
+    console.log("create_lobby event received:", data);
 
     try {
         const entryFee = Number(data?.entryFee || 0);
@@ -61,125 +63,97 @@ export const handleCreateLobby = async (io, socket, data) => {
         // ==========================================
         // CHECK EXISTING LOBBY
         // ==========================================
+        for (const [lobbyId, lobby] of matchLobbies.entries()) {
+            const playerIndex = lobby.players.findIndex(
+                player => player.userId === userId
+            );
 
-        for (const lobby of matchLobbies.values()) {
+            if (playerIndex !== -1) {
+                // Remove player from old lobby
+                lobby.players.splice(playerIndex, 1);
 
-            const alreadyExists =
-                lobby.players.some(
-                    player =>
-                        player.userId === userId
-                );
+                // Leave Socket.IO room
+                socket.leave(lobbyId);
 
-            if (alreadyExists) {
-
-                socket.emit("lobby_error", {
-                    type:
-                        "ALREADY_IN_LOBBY",
-
-                    message:
-                        "You are already in a lobby",
+                // Notify old lobby
+                socket.to(lobbyId).emit("player_left_lobby", {
+                    userId,
+                    lobbyId,
                 });
 
-                return;
+                console.log(
+                    `🚪 User ${userId} left old lobby ${lobbyId}`
+                );
+
+                // If lobby becomes empty, delete it
+                if (lobby.players.length === 0) {
+                    matchLobbies.delete(lobbyId);
+
+                    console.log(
+                        `🗑️ Empty lobby deleted: ${lobbyId}`
+                    );
+                } else {
+                    // Update remaining players
+                    io.to(lobbyId).emit("lobby_updated", {
+                        lobbyId,
+                        players: lobby.players,
+                    });
+                }
+
+                // User can now join the new lobby
+                break;
             }
         }
-
 
         // ==========================================
         // CREATE LOBBY
         // ==========================================
 
-        const lobbyId =
-            `lobby_${Date.now()}_${Math.random()
-                .toString(36)
-                .slice(2, 8)}`;
+        const lobbyId = `lobby_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
 
         const lobby = {
-
             lobbyId,
-
-            ownerId:
-                userId,
-
+            ownerId: userId,
             entryFee,
-
-            status:
-                "waiting",
-
+            status: "waiting",
             players: [
-
                 {
                     userId,
-
-                    name:
-                        user.name,
-
-                    socketId:
-                        socket.id,
-
+                    name: user.name,
+                    socketId: socket.id,
                     seat: 1,
                 },
 
             ],
 
-            createdAt:
-                new Date(),
+            createdAt: new Date(),
         };
+        matchLobbies.set(lobbyId, lobby);
 
 
-        matchLobbies.set(
+        socket.join(lobbyId);
+
+
+        console.log(`🏠 Lobby created: ${lobbyId}`);
+
+
+        socket.emit("lobby_created", {
             lobbyId,
-            lobby
-        );
-
-
-        socket.join(
-            lobbyId
-        );
-
-
-        console.log(
-            `🏠 Lobby created: ${lobbyId}`
-        );
-
-
-        socket.emit(
-            "lobby_created",
-            {
-
-                lobbyId,
-
-                ownerId:
-                    userId,
-
-                entryFee,
-
-                playersCount:
-                    PLAYERS_COUNT,
-
-                players:
-                    lobby.players,
-
-                status:
-                    "waiting",
-
-                coins:
-                    user.coins,
-            }
+            ownerId: userId,
+            entryFee,
+            playersCount: PLAYERS_COUNT,
+            players: lobby.players,
+            status: "waiting",
+            coins: user.coins,
+        }
         );
 
     } catch (error) {
-
-        console.error(
-            "create_lobby error:",
-            error
-        );
-
+        console.error("create_lobby error:", error);
         socket.emit("lobby_error", {
             type: "SERVER_ERROR",
-            message:
-                "Unable to create lobby",
+            message: "Unable to create lobby",
         });
     }
 };

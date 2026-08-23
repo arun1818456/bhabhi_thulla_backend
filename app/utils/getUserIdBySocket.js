@@ -1,5 +1,5 @@
 
-
+import onlinePlayers from "../data/online_players.js";
 
 export const findUserIdBySocket = (socketId) => {
     for (const [userId, player] of onlinePlayers.entries()) {

@@ -5,7 +5,8 @@ import { handlePlayCard } from "./handlers/playCard.js";
 import { handleDisconnect } from "./handlers/disconnect.js";
 import { handleCreateLobby } from "./handlers/createLobby.js";
 
-export const initSocketIO = (server) => {
+export const 
+initSocketIO = (server) => {
     const io = new Server(server, {
         cors: {
             origin: "*",
@@ -20,12 +21,9 @@ export const initSocketIO = (server) => {
             handleJoinGame(socket, playerData);
         });
         // create a Lobby 
-        socket.on("join_game", (playerData) => {
+        socket.on("create_lobby", (playerData) => {
             handleCreateLobby(io, socket, playerData);
         });
-
-
-
 
 
         socket.on("find_match", (matchData) => {

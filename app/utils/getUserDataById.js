@@ -1,3 +1,4 @@
+import User from "../modules/user/model.js";
 
 export const getUser = async (userId) => {
 

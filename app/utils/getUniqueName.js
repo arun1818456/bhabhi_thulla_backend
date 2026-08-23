@@ -42,7 +42,7 @@ export const getUniqueGuestName = async () => {
 
     const userName = `Guest${word}${randomNumber}`;
 
-    const existingUser = await User.findOne({ userName });
+    const existingUser = await User.findOne({ name: userName });
 
     if (!existingUser) {
       return userName;
