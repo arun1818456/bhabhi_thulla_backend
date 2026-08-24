@@ -2,10 +2,8 @@ import User from "./model.js";
 import FriendRequest from "./requestModel.js";
 import { getUniqueGuestName } from "../../utils/getUniqueName.js";
 import { sendResponse } from "../../utils/sendResposeType.js";
-import {
-    emitFriendAdded,
-    emitFriendRequestReceived,
-} from "../../socket/handlers/friendEvents.js";
+import { emitFriendAdded, emitFriendRequestReceived, } from "../../socket/handlers/friendEvents.js";
+import { generateUniquePid } from "../../utils/getUniquePID.js";
 
 export const guestLogin = async (req, res) => {
     try {
@@ -19,7 +17,9 @@ export const guestLogin = async (req, res) => {
         });
         if (!user) {
             const randomGuestName = await getUniqueGuestName();
+            const pid = await generateUniquePid();
             user = await User.create({
+                pid,
                 deviceId: deviceId,
                 name: randomGuestName,
                 loginType: "guest",
@@ -31,6 +31,9 @@ export const guestLogin = async (req, res) => {
             });
 
         } else {
+            if (!user.pid) {
+                user.pid = await generateUniquePid();
+            }
             user.lastLoginAt = new Date();
             await user.save();
         }
@@ -40,6 +43,29 @@ export const guestLogin = async (req, res) => {
         console.error("Error during guest login:", error);
         return sendResponse(res, 500, false, "Error during guest login", null, error.message);
 
+    }
+};
+
+export const getUserByPID = async (req, res) => {
+    try {
+        const { PID } = req.params;
+        const user = await User.findOne({ pid: PID });
+        if (!user) {
+            return sendResponse(res, 400, false, "User not found");
+        }
+        const data = {
+            id: user._id,
+            pid: user.pid,
+            name: user.name,
+            avatar: user.avatar,
+            level: user.level,
+            flag: user.flag,
+        }
+
+        return sendResponse(res, 200, true, "User found", data);
+    } catch (error) {
+        console.error("Error fetching user by PID:", error);
+        return sendResponse(res, 500, false, "Error fetching user by PID", null, error.message);
     }
 };
 
@@ -65,7 +91,7 @@ export const sendRequest = async (req, res) => {
         }
 
         if ((sender.friends || []).some((friendId) => String(friendId) === String(receiverId))) {
-            return sendResponse(res, 409, false, "Users are already friends");
+            return sendResponse(res, 400, false, "Users are already friends");
         }
 
         const existingRequest = await FriendRequest.findOne({
@@ -76,7 +102,7 @@ export const sendRequest = async (req, res) => {
             status: "pending",
         });
         if (existingRequest) {
-            return sendResponse(res, 409, false, "Friend request already sent");
+            return sendResponse(res, 400, false, "Friend request already sent");
         }
 
         const request = await FriendRequest.create({ senderId, receiverId });
@@ -102,7 +128,7 @@ export const acceptRequest = async (req, res) => {
             status: "pending",
         });
         if (!request) {
-            return sendResponse(res, 404, false, "Friend request not found");
+            return sendResponse(res, 400, false, "Friend request not found");
         }
 
         const [sender, receiver] = await Promise.all([
@@ -111,7 +137,7 @@ export const acceptRequest = async (req, res) => {
         ]);
 
         if (!sender || !receiver) {
-            return sendResponse(res, 404, false, "Sender or receiver not found");
+            return sendResponse(res, 400, false, "Sender or receiver not found");
         }
 
         await FriendRequest.findByIdAndDelete(request._id);
@@ -152,31 +178,6 @@ export const rejectRequest = async (req, res) => {
     }
 };
 
-export const cancelRequest = async (req, res) => {
-    try {
-        const { requestId, senderId } = req.body || {};
-
-        if (!requestId || !senderId) {
-            return sendResponse(res, 400, false, "requestId and senderId are required");
-        }
-
-        const request = await FriendRequest.findOneAndDelete({
-            _id: requestId,
-            senderId,
-            status: "pending",
-        });
-        if (!request) {
-            return sendResponse(res, 404, false, "Friend request not found");
-        }
-
-        return sendResponse(res, 200, true, "Friend request cancelled", {
-            requestId: request._id,
-        });
-    } catch (error) {
-        console.error("Error cancelling friend request:", error);
-        return sendResponse(res, 500, false, "Error cancelling friend request", null, error.message);
-    }
-};
 
 export const getRequests = async (req, res) => {
     try {
@@ -187,7 +188,7 @@ export const getRequests = async (req, res) => {
         }
 
         const requests = await FriendRequest.find({ receiverId, status: "pending" })
-            .populate("senderId", "name avatar")
+            .populate("senderId", "name avatar pid flag level")
             .sort({ createdAt: -1 });
 
         return sendResponse(res, 200, true, "Friend requests fetched", requests);

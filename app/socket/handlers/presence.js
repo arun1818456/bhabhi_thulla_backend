@@ -1,5 +1,5 @@
-import User from "../modules/user/model.js";
-import onlinePlayers from "../data/online_players.js";
+import User from "../../modules/user/model.js";
+import onlinePlayers from "../../data/online_players.js";
 
 const getFriendIds = (user) =>
     (user.friends || []).map((friendId) => String(friendId));

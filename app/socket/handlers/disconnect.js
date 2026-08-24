@@ -1,6 +1,6 @@
 import onlinePlayers from "../../data/online_players.js";
 import matchmakingQueue from "../../data/matchmaking_queue.js";
-import { notifyFriendPresence } from "../presence.js";
+import { notifyFriendPresence } from "../handlers/presence.js";
 
 export const handleDisconnect = async (io, socket) => {
   console.log("Player disconnected!");

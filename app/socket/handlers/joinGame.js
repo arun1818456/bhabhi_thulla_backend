@@ -1,5 +1,5 @@
 import onlinePlayers from "../../data/online_players.js";
-import { emitFriendsPresence, notifyFriendPresence } from "../presence.js";
+import { emitFriendsPresence, notifyFriendPresence } from "../handlers/presence.js";
 
 export const handleJoinGame = async (io, socket, playerData) => {
   const { userId, name } = playerData;
