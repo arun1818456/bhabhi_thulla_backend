@@ -1,7 +1,8 @@
 import onlinePlayers from "../../data/online_players.js";
 import matchmakingQueue from "../../data/matchmaking_queue.js";
+import { notifyFriendPresence } from "../presence.js";
 
-export const handleDisconnect = (socket) => {
+export const handleDisconnect = async (io, socket) => {
   console.log("Player disconnected!");
   console.log("Socket ID:", socket.id);
 
@@ -11,6 +12,8 @@ export const handleDisconnect = (socket) => {
     }
 
     onlinePlayers.delete(userId);
+
+    await notifyFriendPresence(io, userId, false);
 
     for (const [queueKey, queue] of matchmakingQueue.entries()) {
       const queueIndex = queue.indexOf(userId);

@@ -31,6 +31,12 @@ const userSchema = new mongoose.Schema({
         type: Number,
         default: 10,
     },
+
+    friends: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+    }],
+
     createdAt: {
         type: Date,
         default: Date.now,
@@ -44,6 +50,8 @@ const userSchema = new mongoose.Schema({
 }, {
     versionKey: false,
 });
+
+userSchema.index({ friends: 1 });
 
 export default mongoose.model(
     "User",

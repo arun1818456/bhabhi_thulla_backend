@@ -4,6 +4,7 @@ import { handleFindMatch } from "./handlers/findMatch.js";
 import { handlePlayCard } from "./handlers/playCard.js";
 import { handleDisconnect } from "./handlers/disconnect.js";
 import { handleCreateLobby } from "./handlers/createLobby.js";
+import { registerSocketIO } from "./handlers/friendEvents.js";
 
 export const 
 initSocketIO = (server) => {
@@ -12,13 +13,16 @@ initSocketIO = (server) => {
             origin: "*",
         },
     });
+    registerSocketIO(io);
 
     io.on("connection", (socket) => {
         console.log("Player connected!");
         console.log("Socket ID:", socket.id);
         // check user online 
         socket.on("join_game", (playerData) => {
-            handleJoinGame(socket, playerData);
+            handleJoinGame(io, socket, playerData).catch((error) => {
+                console.error("join_game error:", error);
+            });
         });
         // create a Lobby 
         socket.on("create_lobby", (playerData) => {
@@ -35,7 +39,9 @@ initSocketIO = (server) => {
         });
 
         socket.on("disconnect", () => {
-            handleDisconnect(socket);
+            handleDisconnect(io, socket).catch((error) => {
+                console.error("disconnect presence error:", error);
+            });
         });
     });
 

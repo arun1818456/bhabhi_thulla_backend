@@ -1,6 +1,11 @@
 import User from "./model.js";
+import FriendRequest from "./requestModel.js";
 import { getUniqueGuestName } from "../../utils/getUniqueName.js";
 import { sendResponse } from "../../utils/sendResposeType.js";
+import {
+    emitFriendAdded,
+    emitFriendRequestReceived,
+} from "../../socket/handlers/friendEvents.js";
 
 export const guestLogin = async (req, res) => {
     try {
@@ -38,6 +43,182 @@ export const guestLogin = async (req, res) => {
     }
 };
 
+export const sendRequest = async (req, res) => {
+    try {
+        const { senderId, receiverId } = req.body || {};
+
+        if (!senderId || !receiverId) {
+            return sendResponse(res, 400, false, "senderId and receiverId are required");
+        }
+
+        if (String(senderId) === String(receiverId)) {
+            return sendResponse(res, 400, false, "You cannot send a request to yourself");
+        }
+
+        const [sender, receiver] = await Promise.all([
+            User.findById(senderId).select("friends"),
+            User.findById(receiverId).select("friends"),
+        ]);
+
+        if (!sender || !receiver) {
+            return sendResponse(res, 404, false, "Sender or receiver not found");
+        }
+
+        if ((sender.friends || []).some((friendId) => String(friendId) === String(receiverId))) {
+            return sendResponse(res, 409, false, "Users are already friends");
+        }
+
+        const existingRequest = await FriendRequest.findOne({
+            $or: [
+                { senderId, receiverId },
+                { senderId: receiverId, receiverId: senderId },
+            ],
+            status: "pending",
+        });
+        if (existingRequest) {
+            return sendResponse(res, 409, false, "Friend request already sent");
+        }
+
+        const request = await FriendRequest.create({ senderId, receiverId });
+        emitFriendRequestReceived(receiverId, request);
+        return sendResponse(res, 201, true, "Friend request sent", request);
+    } catch (error) {
+        console.error("Error sending friend request:", error);
+        return sendResponse(res, 500, false, "Error sending friend request", null, error.message);
+    }
+};
+
+export const acceptRequest = async (req, res) => {
+    try {
+        const { requestId, receiverId } = req.body || {};
+
+        if (!requestId || !receiverId) {
+            return sendResponse(res, 400, false, "requestId and receiverId are required");
+        }
+
+        const request = await FriendRequest.findOne({
+            _id: requestId,
+            receiverId,
+            status: "pending",
+        });
+        if (!request) {
+            return sendResponse(res, 404, false, "Friend request not found");
+        }
+
+        const [sender, receiver] = await Promise.all([
+            User.findByIdAndUpdate(request.senderId, { $addToSet: { friends: request.receiverId } }, { new: true }),
+            User.findByIdAndUpdate(request.receiverId, { $addToSet: { friends: request.senderId } }, { new: true }),
+        ]);
+
+        if (!sender || !receiver) {
+            return sendResponse(res, 404, false, "Sender or receiver not found");
+        }
+
+        await FriendRequest.findByIdAndDelete(request._id);
+        emitFriendAdded([request.senderId, request.receiverId]);
+        return sendResponse(res, 200, true, "Friend request accepted", {
+            requestId: request._id,
+            friends: receiver.friends,
+        });
+    } catch (error) {
+        console.error("Error accepting friend request:", error);
+        return sendResponse(res, 500, false, "Error accepting friend request", null, error.message);
+    }
+};
+
+export const rejectRequest = async (req, res) => {
+    try {
+        const { requestId, receiverId } = req.body || {};
+
+        if (!requestId || !receiverId) {
+            return sendResponse(res, 400, false, "requestId and receiverId are required");
+        }
+
+        const request = await FriendRequest.findOneAndDelete({
+            _id: requestId,
+            receiverId,
+            status: "pending",
+        });
+        if (!request) {
+            return sendResponse(res, 404, false, "Friend request not found");
+        }
+
+        return sendResponse(res, 200, true, "Friend request rejected", {
+            requestId: request._id,
+        });
+    } catch (error) {
+        console.error("Error rejecting friend request:", error);
+        return sendResponse(res, 500, false, "Error rejecting friend request", null, error.message);
+    }
+};
+
+export const cancelRequest = async (req, res) => {
+    try {
+        const { requestId, senderId } = req.body || {};
+
+        if (!requestId || !senderId) {
+            return sendResponse(res, 400, false, "requestId and senderId are required");
+        }
+
+        const request = await FriendRequest.findOneAndDelete({
+            _id: requestId,
+            senderId,
+            status: "pending",
+        });
+        if (!request) {
+            return sendResponse(res, 404, false, "Friend request not found");
+        }
+
+        return sendResponse(res, 200, true, "Friend request cancelled", {
+            requestId: request._id,
+        });
+    } catch (error) {
+        console.error("Error cancelling friend request:", error);
+        return sendResponse(res, 500, false, "Error cancelling friend request", null, error.message);
+    }
+};
+
+export const getRequests = async (req, res) => {
+    try {
+        const { receiverId } = req.query;
+
+        if (!receiverId) {
+            return sendResponse(res, 400, false, "receiverId is required");
+        }
+
+        const requests = await FriendRequest.find({ receiverId, status: "pending" })
+            .populate("senderId", "name avatar")
+            .sort({ createdAt: -1 });
+
+        return sendResponse(res, 200, true, "Friend requests fetched", requests);
+    } catch (error) {
+        console.error("Error fetching friend requests:", error);
+        return sendResponse(res, 500, false, "Error fetching friend requests", null, error.message);
+    }
+};
+
+export const getFriends = async (req, res) => {
+    try {
+        const { userId } = req.query;
+
+        if (!userId) {
+            return sendResponse(res, 400, false, "userId is required");
+        }
+
+        const user = await User.findById(userId)
+            .populate("friends", "name avatar")
+            .select("friends");
+
+        if (!user) {
+            return sendResponse(res, 404, false, "User not found");
+        }
+
+        return sendResponse(res, 200, true, "Friends fetched", user.friends);
+    } catch (error) {
+        console.error("Error fetching friends:", error);
+        return sendResponse(res, 500, false, "Error fetching friends", null, error.message);
+    }
+};
 
 
 
