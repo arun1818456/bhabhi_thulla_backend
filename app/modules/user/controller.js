@@ -106,7 +106,14 @@ export const sendRequest = async (req, res) => {
         }
 
         const request = await FriendRequest.create({ senderId, receiverId });
-        emitFriendRequestReceived(receiverId, request);
+        const populatedRequest = await FriendRequest
+            .findById(request._id)
+            .populate(
+                "senderId",
+                "_id pid name avatar flag level"
+            ).lean();
+
+        emitFriendRequestReceived(receiverId, populatedRequest);
         return sendResponse(res, 201, true, "Friend request sent", request);
     } catch (error) {
         console.error("Error sending friend request:", error);
@@ -207,7 +214,7 @@ export const getFriends = async (req, res) => {
         }
 
         const user = await User.findById(userId)
-            .populate("friends", "name avatar")
+            .populate("friends", "_id pid name avatar flag level")
             .select("friends");
 
         if (!user) {

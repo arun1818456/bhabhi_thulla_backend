@@ -14,8 +14,8 @@ import {
 const router = express.Router();
 
 router.post("/guest",guestLogin);
-router.get("/user/:PID",getUserByPID); // Get user by PID
-router.post("/sendRequest",sendRequest);
+router.get("/user/:PID",getUserByPID); // Get user by PID on Search
+router.post("/sendRequest",sendRequest);  
 router.post("/acceptRequest",acceptRequest);
 router.post("/rejectRequest",rejectRequest);
 router.get("/requests",getRequests);
