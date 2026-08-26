@@ -1,3 +1,5 @@
+import User from "../modules/user/model.js";
+
 export const generateUniquePid = async () => {
     const min = 10000000;
     const max = 999999999999;

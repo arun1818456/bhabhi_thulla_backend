@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import User from "./model.js";
 import FriendRequest from "./requestModel.js";
 import { getUniqueGuestName } from "../../utils/getUniqueName.js";
@@ -192,6 +193,10 @@ export const getRequests = async (req, res) => {
 
         if (!receiverId) {
             return sendResponse(res, 400, false, "receiverId is required");
+        }
+
+        if (!mongoose.isValidObjectId(receiverId)) {
+            return sendResponse(res, 400, false, "receiverId must be a valid user ID");
         }
 
         const requests = await FriendRequest.find({ receiverId, status: "pending" })
