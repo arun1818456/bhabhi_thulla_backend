@@ -7,7 +7,7 @@ const userSchema = new mongoose.Schema({
         required: true,
         unique: true,
         min: 10000000,
-        max: 999999999999,
+        max: 999999999,
         index: true,
     },
 

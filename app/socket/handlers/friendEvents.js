@@ -13,7 +13,6 @@ export const emitFriendAdded = async (userIds) => {
     }
 
     try {
-        // Dono users ka data fetch karo
         const users = await User.find({
             _id: { $in: userIds },
         })
@@ -37,13 +36,26 @@ export const emitFriendAdded = async (userIds) => {
                 continue;
             }
 
-            // Sirf friend ka data send karo
+            // Friend ka online/offline status
+            const friendPlayer = onlinePlayers.get(
+                String(friend._id)
+            );
+
+            const friendData = {
+                ...friend,
+                isOnline: !!friendPlayer?.socketId,
+            };
+
+            // Sirf friend ka data + online status
             socketIO
                 .to(player.socketId)
-                .emit("friendAdded", friend);
+                .emit("friendAdded", friendData);
         }
     } catch (error) {
-        console.error("emitFriendAdded error:", error);
+        console.error(
+            "emitFriendAdded error:",
+            error
+        );
     }
 };
 
@@ -56,4 +68,28 @@ export const emitFriendRequestReceived = (userId, request) => {
     if (player?.socketId) {
         socketIO.to(player.socketId).emit("friendRequestReceived", request);
     }
+};
+
+export const removeFriendFromList = (userId, removedFriendId) => {
+    if (!socketIO) {
+        console.log("❌ socketIO not initialized");
+        return;
+    }
+
+    const player = onlinePlayers.get(String(userId));
+
+    if (!player?.socketId) {
+        console.log(
+            `❌ User ${userId} is offline or socket not found`
+        );
+        return;
+    }
+
+    socketIO.to(player.socketId).emit("friendRemoved", {
+        userId: String(removedFriendId),
+    });
+
+    console.log(
+        `✅ friendRemoved sent to ${userId}, removed friend: ${removedFriendId}`
+    );
 };

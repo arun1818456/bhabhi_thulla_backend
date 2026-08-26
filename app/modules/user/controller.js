@@ -3,8 +3,10 @@ import User from "./model.js";
 import FriendRequest from "./requestModel.js";
 import { getUniqueGuestName } from "../../utils/getUniqueName.js";
 import { sendResponse } from "../../utils/sendResposeType.js";
-import { emitFriendAdded, emitFriendRequestReceived, } from "../../socket/handlers/friendEvents.js";
+import { emitFriendAdded, emitFriendRequestReceived, removeFriendFromList } from "../../socket/handlers/friendEvents.js";
 import { generateUniquePid } from "../../utils/getUniquePID.js";
+import { jwtTokenGenerator } from "../../utils/generateJWTtoken.js";
+import onlinePlayers from "../../data/online_players.js";
 
 export const guestLogin = async (req, res) => {
     try {
@@ -32,13 +34,15 @@ export const guestLogin = async (req, res) => {
             });
 
         } else {
-            if (!user.pid) {
-                user.pid = await generateUniquePid();
-            }
             user.lastLoginAt = new Date();
             await user.save();
         }
-        return sendResponse(res, 200, true, "Guest login successful", user);
+        // Generate token after user exists
+        const token = jwtTokenGenerator(user._id);
+        // Add token inside same user object
+        const userData = user.toObject();
+        userData.token = token;
+        return sendResponse(res, 200, true, "Guest login successful", userData);
 
     } catch (error) {
         console.error("Error during guest login:", error);
@@ -72,7 +76,8 @@ export const getUserByPID = async (req, res) => {
 
 export const sendRequest = async (req, res) => {
     try {
-        const { senderId, receiverId } = req.body || {};
+        const { receiverId } = req.body || {};
+        const senderId = req.user.id;
 
         if (!senderId || !receiverId) {
             return sendResponse(res, 400, false, "senderId and receiverId are required");
@@ -124,7 +129,8 @@ export const sendRequest = async (req, res) => {
 
 export const acceptRequest = async (req, res) => {
     try {
-        const { requestId, receiverId } = req.body || {};
+        const { requestId } = req.body || {};
+        const receiverId = req.user.id;
 
         if (!requestId || !receiverId) {
             return sendResponse(res, 400, false, "requestId and receiverId are required");
@@ -162,7 +168,8 @@ export const acceptRequest = async (req, res) => {
 
 export const rejectRequest = async (req, res) => {
     try {
-        const { requestId, receiverId } = req.body || {};
+        const { requestId } = req.body || {};
+        const receiverId = req.user.id;
 
         if (!requestId || !receiverId) {
             return sendResponse(res, 400, false, "requestId and receiverId are required");
@@ -186,55 +193,205 @@ export const rejectRequest = async (req, res) => {
     }
 };
 
-
-export const getRequests = async (req, res) => {
+export const removeFriend = async (req, res) => {
     try {
-        const { receiverId } = req.query;
+        const { userId } = req.params;
+        const currentUserId = req.user.id;
 
-        if (!receiverId) {
-            return sendResponse(res, 400, false, "receiverId is required");
+        if (!currentUserId || !userId) {
+            return sendResponse(
+                res,
+                400,
+                false,
+                "userId is required"
+            );
         }
 
-        if (!mongoose.isValidObjectId(receiverId)) {
-            return sendResponse(res, 400, false, "receiverId must be a valid user ID");
+        if (
+            !mongoose.isValidObjectId(currentUserId) ||
+            !mongoose.isValidObjectId(userId)
+        ) {
+            return sendResponse(
+                res,
+                400,
+                false,
+                "Invalid user ID"
+            );
         }
 
-        const requests = await FriendRequest.find({ receiverId, status: "pending" })
-            .populate("senderId", "name avatar pid flag level")
-            .sort({ createdAt: -1 });
+        if (String(currentUserId) === String(userId)) {
+            return sendResponse(
+                res,
+                400,
+                false,
+                "You cannot remove yourself"
+            );
+        }
 
-        return sendResponse(res, 200, true, "Friend requests fetched", requests);
+        // Remove friend from both users
+        const [currentUser, friendUser] = await Promise.all([
+            User.findByIdAndUpdate(
+                currentUserId,
+                {
+                    $pull: {
+                        friends: userId,
+                    },
+                },
+                {
+                    returnDocument: "after",
+                }
+            ),
+
+            User.findByIdAndUpdate(
+                userId,
+                {
+                    $pull: {
+                        friends: currentUserId,
+                    },
+                },
+                {
+                    returnDocument: "after",
+                }
+            ),
+        ]);
+
+        if (!currentUser || !friendUser) {
+            return sendResponse(
+                res,
+                404,
+                false,
+                "User not found"
+            );
+        }
+
+        // IMPORTANT:
+        // userId = jis friend ko remove kiya
+        // currentUserId = jisne remove kiya
+        //
+        // Removed friend ko socket bhejna hai,
+        // taaki uski friend list se current user remove ho.
+        removeFriendFromList(
+            userId,
+            currentUserId
+        );
+
+        return sendResponse(
+            res,
+            200,
+            true,
+            "Friend removed successfully",
+            {
+                userId: userId,
+            }
+        );
+
     } catch (error) {
-        console.error("Error fetching friend requests:", error);
-        return sendResponse(res, 500, false, "Error fetching friend requests", null, error.message);
+        console.error(
+            "Error removing friend:",
+            error
+        );
+
+        return sendResponse(
+            res,
+            500,
+            false,
+            "Error removing friend",
+            null,
+            error.message
+        );
     }
 };
 
-export const getFriends = async (req, res) => {
+export const getConnections = async (req, res) => {
     try {
-        const { userId } = req.query;
+        const userId = req.user.id;
 
         if (!userId) {
-            return sendResponse(res, 400, false, "userId is required");
+            return sendResponse(
+                res,
+                400,
+                false,
+                "userId is required"
+            );
         }
 
-        const user = await User.findById(userId)
-            .populate("friends", "_id pid name avatar flag level")
-            .select("friends");
+        if (!mongoose.isValidObjectId(userId)) {
+            return sendResponse(
+                res,
+                400,
+                false,
+                "userId must be a valid user ID"
+            );
+        }
+
+        const [user, requests] = await Promise.all([
+            User.findById(userId)
+                .populate(
+                    "friends",
+                    "_id pid name avatar flag level"
+                )
+                .select("friends"),
+
+            FriendRequest.find({
+                receiverId: userId,
+                status: "pending",
+            })
+                .populate(
+                    "senderId",
+                    "_id pid name avatar flag level"
+                )
+                .sort({ createdAt: -1 }),
+        ]);
 
         if (!user) {
-            return sendResponse(res, 404, false, "User not found");
+            return sendResponse(
+                res,
+                404,
+                false,
+                "User not found"
+            );
         }
 
-        return sendResponse(res, 200, true, "Friends fetched", user.friends);
+        // Add online/offline status to friends
+        const friends = (user.friends || []).map((friend) => {
+            const friendData = friend.toObject();
+
+            const player = onlinePlayers.get(
+                String(friend._id)
+            );
+
+            friendData.isOnline = !!player?.socketId;
+
+            return friendData;
+        });
+
+        return sendResponse(
+            res,
+            200,
+            true,
+            "Connections fetched successfully",
+            {
+                friends,
+                requests: requests || [],
+            }
+        );
+
     } catch (error) {
-        console.error("Error fetching friends:", error);
-        return sendResponse(res, 500, false, "Error fetching friends", null, error.message);
+        console.error(
+            "Error fetching connections:",
+            error
+        );
+
+        return sendResponse(
+            res,
+            500,
+            false,
+            "Error fetching connections",
+            null,
+            error.message
+        );
     }
 };
-
-
-
 
 // // ✅ REGISTER USER
 // export const RegisterUser = async (req, res) => {

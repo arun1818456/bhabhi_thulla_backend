@@ -67,7 +67,7 @@ connectDB();
 // POST /api/auth/login
 // POST /api/auth/register
 
-app.use("/api/auth", userRoutes);
+app.use("/api/user", userRoutes);
 
 
 // ============================================================
