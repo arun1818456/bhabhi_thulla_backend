@@ -145,7 +145,7 @@ export const handleCreateLobby = async (io, socket, data) => {
             playersCount: PLAYERS_COUNT,
             players: lobby.players,
             status: "waiting",
-            coins: user.coins,
+            myCoins: user.coins,
         }
         );
 
