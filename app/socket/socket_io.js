@@ -6,6 +6,8 @@ import { handleDisconnect } from "./handlers/disconnect.js";
 import { handleCreateLobby } from "./handlers/createLobby.js";
 import { registerSocketIO } from "./handlers/friendEvents.js";
 import { handleInvitePlayer } from "./handlers/onInvitePlayer.js";
+import { handleAcceptInvite } from "./handlers/acceptInvitation.js";
+import { handleRejectInvite } from "./handlers/onrejectLobbyInvite.js"
 
 export const
     initSocketIO = (server) => {
@@ -25,22 +27,20 @@ export const
                 handleCreateLobby(io, socket, playerData);
             });
             //  on Invite Player 
-            socket.on("invitePlayer", (targetUserId) => {
-                console.log(`invitePlayer event received for targetUserId: ${targetUserId}`);
+            socket.on("invite_player", (targetUserId) => {
+                console.log(`invitePlayer event received for targetUserId: ${targetUserId.id}`);
                 handleInvitePlayer(io, socket, targetUserId);
             });
 
             socket.on("acceptInvite", (lobbyId) => {
                 handleAcceptInvite(io, socket, lobbyId);
             });
-            
-            socket.on("rejectInvite", ({ ownerId }) => {
-                const owner = onlinePlayers.get(ownerId);
 
-                if (owner) {
-                    io.to(owner.socketId).emit("inviteRejected");
-                }
+
+            socket.on("reject_invite", async (data) => {
+                handleRejectInvite(io, socket, data);
             });
+
             socket.on("leaveLobby", (lobbyId) => {
                 handleLeaveLobby(io, socket, lobbyId);
             });

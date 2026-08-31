@@ -54,7 +54,7 @@ app.use(express.urlencoded({ extended: true }));
 // DATABASE CONNECTION
 // ============================================================
 
-connectDB();
+await connectDB();
 
 
 // ============================================================

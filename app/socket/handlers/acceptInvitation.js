@@ -1,11 +1,11 @@
-import { onlineUsers } from "../../data/onlineUsers.js";
-import { lobbies } from "../../data/match_lobbies.js";
+import  onlineUsers  from "../../data/online_players.js";
+import  matchLobbies  from "../../data/match_lobbies.js";
 
 
 export const handleAcceptInvite = async (io, socket, lobbyId) => {
     try {
         const user = onlineUsers.get(socket.userId);
-        const newLobby = lobbies.get(lobbyId);
+        const newLobby = matchLobbies.get(lobbyId);
 
         if (!newLobby) {
             socket.emit("joinFailed", "Lobby not found");
@@ -14,7 +14,7 @@ export const handleAcceptInvite = async (io, socket, lobbyId) => {
 
         // User ki current lobby check
         if (user.lobbyId) {
-            const oldLobby = lobbies.get(user.lobbyId);
+            const oldLobby = matchLobbies.get(user.lobbyId);
 
             if (oldLobby) {
                 const isSoloLobby =
@@ -24,7 +24,7 @@ export const handleAcceptInvite = async (io, socket, lobbyId) => {
                 if (isSoloLobby) {
                     // Purani solo lobby delete
                     socket.leave(user.lobbyId);
-                    lobbies.delete(user.lobbyId);
+                    matchLobbies.delete(user.lobbyId);
                     user.lobbyId = null;
                 } else {
                     socket.emit("joinFailed", "Already in another lobby");

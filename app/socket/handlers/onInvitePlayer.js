@@ -1,12 +1,12 @@
 import onlinePlayers from "../../data/online_players.js";
 import matchLobbies from "../../data/match_lobbies.js";
 import { findUserIdBySocket } from "../../utils/getUserIdBySocket.js";
-
+import User from "../../modules/user/model.js";
 
 export const handleInvitePlayer = async (io, socket, data) => {
     try {
         const targetUserId = typeof data === "object"
-            ? data?.targetUserId
+            ? data?.id
             : data;
         const senderUserId = findUserIdBySocket(socket.id);
         const sender = senderUserId && onlinePlayers.get(senderUserId);
@@ -36,11 +36,15 @@ export const handleInvitePlayer = async (io, socket, data) => {
             socket.emit("inviteFailed", "Player already in lobby");
             return;
         }
-
-        io.to(target.socketId).emit("lobbyInvite", {
+        const userData =await User.findById(senderUserId).select("name avatar level").lean();
+         const  sendData = {
+            ...userData,
             lobbyId: lobby.lobbyId,
             ownerId: senderUserId,
-        });
+           
+        };
+
+        io.to(target.socketId).emit("lobby_invite", sendData);
 
         console.log(`Invitation sent from ${socket.id} to ${targetUserId}`);
     } catch (error) {
