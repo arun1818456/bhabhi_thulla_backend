@@ -8,6 +8,7 @@ import { registerSocketIO } from "./handlers/friendEvents.js";
 import { handleInvitePlayer } from "./handlers/onInvitePlayer.js";
 import { handleAcceptInvite } from "./handlers/acceptInvitation.js";
 import { handleRejectInvite } from "./handlers/onrejectLobbyInvite.js"
+import { handleLeaveLobby } from "./handlers/leaveLobby.js";
 
 export const
     initSocketIO = (server) => {
@@ -28,12 +29,12 @@ export const
             });
             //  on Invite Player 
             socket.on("invite_player", (targetUserId) => {
-                console.log(`invitePlayer event received for targetUserId: ${targetUserId.id}`);
                 handleInvitePlayer(io, socket, targetUserId);
             });
 
-            socket.on("acceptInvite", (lobbyId) => {
-                handleAcceptInvite(io, socket, lobbyId);
+            socket.on("accept_invite", (data) => {
+                console.log(`accept_invite event received for lobbyId: ${data.lobbyId}`);
+                handleAcceptInvite(io, socket, data);
             });
 
 

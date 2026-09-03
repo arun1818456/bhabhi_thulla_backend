@@ -1,5 +1,5 @@
- import { onlineUsers } from "../../data/onlineUsers.js";
-import { lobbies } from "../../data/match_lobbies.js";
+import  onlineUsers  from "../../data/online_players.js";
+import  matchLobbies  from "../../data/match_lobbies.js";
 
 export const handleLeaveLobby = async (io, socket, lobbyId) => {
     const user = onlineUsers.get(socket.userId);
@@ -22,7 +22,7 @@ export const handleLeaveLobby = async (io, socket, lobbyId) => {
     });
 
     if (lobby.members.length === 0) {
-        lobbies.delete(user.lobbyId);
+        matchLobbies.delete(user.lobbyId);
     }
 
     user.lobbyId = null;
