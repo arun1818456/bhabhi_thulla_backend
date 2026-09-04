@@ -138,6 +138,8 @@ export const handleAcceptInvite = async (io, socket, data) => {
         newLobby.players.push({
             userId: userId,
             name: user.name,
+            avatar: user.avatar,
+            flag: user.flag,
             socketId: socket.id,
             seat: newLobby.players.length + 1,
         });
