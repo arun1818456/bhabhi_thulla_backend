@@ -32,11 +32,19 @@ export const handleInvitePlayer = async (io, socket, data) => {
             return;
         }
 
-        if (target.lobbyId || target.pendingJoin) {
+        const targetLobby = [...matchLobbies.values()].find((currentLobby) =>
+            currentLobby.players.some(
+                (player) => String(player.userId) === String(targetUserId)
+            )
+        );
+
+        if (targetLobby) {
             socket.emit("inviteFailed", "Player already in lobby");
             return;
         }
-        const userData =await User.findById(senderUserId).select("name avatar level").lean();
+        const userData = await User.findById(senderUserId)
+            .select("name avatar flag level")
+            .lean();
          const  sendData = {
             ...userData,
             lobbyId: lobby.lobbyId,

@@ -157,6 +157,9 @@ export const handleJoinLobby = async (io, socket, data) => {
         const player = {
             userId,
             name: user.name,
+            avatar: user.avatar,
+            flag: user.flag,
+            level: user.level,
             socketId: socket.id,
             seat: lobby.players.length + 1,
         };
@@ -179,6 +182,7 @@ export const handleJoinLobby = async (io, socket, data) => {
 
         io.to(lobbyId).emit("lobby_updated", {
             lobbyId,
+            ownerId: lobby.ownerId,
             players: lobby.players,
             totalPlayers: lobby.players.length,
             requiredPlayers: PLAYERS_COUNT,

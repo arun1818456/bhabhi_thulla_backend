@@ -7,6 +7,7 @@ import { emitFriendAdded, emitFriendRequestReceived, removeFriendFromList } from
 import { generateUniquePid } from "../../utils/getUniquePID.js";
 import { jwtTokenGenerator } from "../../utils/generateJWTtoken.js";
 import onlinePlayers from "../../data/online_players.js";
+import matchLobbies from "../../data/match_lobbies.js";
 
 export const guestLogin = async (req, res) => {
     try {
@@ -365,6 +366,26 @@ export const getConnections = async (req, res) => {
             return friendData;
         });
 
+        let lobby = null;
+
+        for (const [lobbyId, currentLobby] of matchLobbies.entries()) {
+            const isUserInLobby = currentLobby.players.some(
+                (player) => String(player.userId) === String(userId)
+            );
+
+            if (!isUserInLobby) {
+                continue;
+            }
+
+            if (currentLobby.players.length === 1) {
+                matchLobbies.delete(lobbyId);
+            } else {
+                lobby = currentLobby;
+            }
+
+            break;
+        }
+
         return sendResponse(
             res,
             200,
@@ -373,6 +394,7 @@ export const getConnections = async (req, res) => {
             {
                 friends,
                 requests: requests || [],
+                lobby,
             }
         );
 

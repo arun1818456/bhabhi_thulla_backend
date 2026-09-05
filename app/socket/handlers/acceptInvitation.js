@@ -1,6 +1,7 @@
 import onlineUsers from "../../data/online_players.js";
 import matchLobbies from "../../data/match_lobbies.js";
 import { findUserIdBySocket } from "../../utils/getUserIdBySocket.js";
+import { getUser } from "../../utils/getUserDataById.js";
 
 const PLAYERS_COUNT = 4;
 
@@ -27,7 +28,17 @@ export const handleAcceptInvite = async (io, socket, data) => {
         // ------------------------------------
         // 2. Find online user
         // ------------------------------------
-        const user = userId && onlineUsers.get(userId);
+        const onlineUser = userId && onlineUsers.get(userId);
+
+        if (!onlineUser) {
+            socket.emit("lobby_error", {
+                type: "USER_NOT_FOUND",
+                message: "User not found",
+            });
+            return;
+        }
+
+        const user = await getUser(userId);
 
         if (!user) {
             socket.emit("lobby_error", {
@@ -119,12 +130,7 @@ export const handleAcceptInvite = async (io, socket, data) => {
         }
 
         // ------------------------------------
-        // 8. Update user's lobbyId
-        // ------------------------------------
-        user.lobbyId = lobbyId;
-
-        // ------------------------------------
-        // 9. Join Socket.IO room
+        // 8. Join Socket.IO room
         // ------------------------------------
         await socket.join(lobbyId);
 
@@ -133,13 +139,14 @@ export const handleAcceptInvite = async (io, socket, data) => {
         );
 
         // ------------------------------------
-        // 10. Add player to lobby
+        // 9. Add player to lobby
         // ------------------------------------
         newLobby.players.push({
             userId: userId,
             name: user.name,
             avatar: user.avatar,
             flag: user.flag,
+            level: user.level,
             socketId: socket.id,
             seat: newLobby.players.length + 1,
         });
@@ -177,6 +184,7 @@ export const handleAcceptInvite = async (io, socket, data) => {
         // ------------------------------------
         io.to(lobbyId).emit("lobby_updated", {
             lobbyId,
+            ownerId: newLobby.ownerId,
             players: newLobby.players,
             totalPlayers: newLobby.players.length,
             requiredPlayers: PLAYERS_COUNT,

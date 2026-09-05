@@ -82,7 +82,7 @@ export const handleRejectInvite = async (io, socket, data) => {
 
         const userData = await User
             .findById(rejectedBy)
-            .select("name avatar level")
+            .select("name avatar flag level")
             .lean();
 
         if (!userData) {
@@ -100,6 +100,7 @@ export const handleRejectInvite = async (io, socket, data) => {
         const responseData = {
             rejectedBy: userData.name ?? "Unknown",
             avatar: userData.avatar ?? "",
+            flag: userData.flag ?? "AU",
             level: userData.level ?? 1,
         };
 

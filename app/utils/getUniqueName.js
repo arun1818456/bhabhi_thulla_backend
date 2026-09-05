@@ -40,7 +40,7 @@ export const getUniqueGuestName = async () => {
 
     const randomNumber = Math.floor(1000 + Math.random() * 9000);
 
-    const userName = `Guest${word}${randomNumber}`;
+    const userName = `${word}${randomNumber}`;
 
     const existingUser = await User.findOne({ name: userName });
 

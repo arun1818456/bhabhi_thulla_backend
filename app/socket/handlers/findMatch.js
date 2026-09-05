@@ -501,6 +501,9 @@ const createGameRoom = async (
             return {
                 userId: player.userId,
                 name: player.name,
+                avatar: player.avatar,
+                flag: player.flag,
+                level: player.level,
                 socketId: player.socketId,
                 seat: index + 1,
                 cards: deck.splice(
@@ -536,10 +539,16 @@ const createGameRoom = async (
         ({
             userId,
             name,
+            avatar,
+            flag,
+            level,
             seat,
         }) => ({
             userId,
             name,
+            avatar,
+            flag,
+            level,
             seat,
         })
     );

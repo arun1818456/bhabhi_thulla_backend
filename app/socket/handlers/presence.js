@@ -23,7 +23,7 @@ import onlinePlayers from "../../data/online_players.js";
 
 export const notifyFriendPresence = async (io, changedUserId, isOnline) => {
     const changedUser = await User.findById(changedUserId)
-        .select("_id name avatar")
+        .select("_id name avatar flag level")
         .lean();
 
     if (!changedUser) {
@@ -46,6 +46,8 @@ export const notifyFriendPresence = async (io, changedUserId, isOnline) => {
                 userId: String(changedUser._id),
                 name: changedUser.name,
                 avatar: changedUser.avatar,
+                flag: changedUser.flag,
+                level: changedUser.level,
                 isOnline,
             },
         });

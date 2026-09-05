@@ -96,6 +96,7 @@ export const handleCreateLobby = async (io, socket, data) => {
                     // Update remaining players
                     io.to(lobbyId).emit("lobby_updated", {
                         lobbyId,
+                        ownerId: lobby.ownerId,
                         players: lobby.players,
                     });
                 }
@@ -121,6 +122,9 @@ export const handleCreateLobby = async (io, socket, data) => {
                 {
                     userId,
                     name: user.name,
+                    avatar: user.avatar,
+                    flag: user.flag,
+                    level: user.level,
                     socketId: socket.id,
                     seat: 1,
                 },
@@ -135,8 +139,7 @@ export const handleCreateLobby = async (io, socket, data) => {
         socket.join(lobbyId);
 
 
-        console.log(`🏠 Lobby created: ${lobbyId}`);
-
+        console.log(`🏠 Lobby created: ${lobbyId} match Lobbies Size is >>>>>> ${matchLobbies.size}`);
 
         socket.emit("lobby_created", {
             lobbyId,
@@ -148,7 +151,6 @@ export const handleCreateLobby = async (io, socket, data) => {
             myCoins: user.coins,
         }
         );
-
     } catch (error) {
         console.error("create_lobby error:", error);
         socket.emit("lobby_error", {
