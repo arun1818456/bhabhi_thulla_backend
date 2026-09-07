@@ -2,7 +2,7 @@ import matchLobbies from "../../data/match_lobbies.js";
 import { findUserIdBySocket } from "../../utils/getUserIdBySocket.js";
 import { getUser } from "../../utils/getUserDataById.js";
 
-const PLAYERS_COUNT = 4;
+const MAX_LOBBY_PLAYERS = 8;
 
 export const handleJoinLobby = async (io, socket, data) => {
     try {
@@ -68,7 +68,7 @@ export const handleJoinLobby = async (io, socket, data) => {
         // CHECK LOBBY FULL
         // ==========================================
 
-        if (lobby.players.length >= PLAYERS_COUNT) {
+        if (lobby.players.length >= MAX_LOBBY_PLAYERS) {
             socket.emit("lobby_error", {
                 type: "LOBBY_FULL",
                 message: "Lobby is full",
@@ -185,7 +185,7 @@ export const handleJoinLobby = async (io, socket, data) => {
             ownerId: lobby.ownerId,
             players: lobby.players,
             totalPlayers: lobby.players.length,
-            requiredPlayers: PLAYERS_COUNT,
+            requiredPlayers: MAX_LOBBY_PLAYERS,
             entryFee: lobby.entryFee,
             status: lobby.status,
         });

@@ -1,7 +1,7 @@
 import { Server } from "socket.io";
 import { handleJoinGame } from "./handlers/joinGame.js";
 import { handleFindMatch } from "./handlers/findMatch.js";
-// import { handlePlayCard } from "./handlers/playCard.js";
+import { handlePlayCard } from "./handlers/playCard.js";
 import { handleDisconnect } from "./handlers/disconnect.js";
 import { handleCreateLobby } from "./handlers/createLobby.js";
 import { registerSocketIO } from "./handlers/friendEvents.js";
@@ -54,13 +54,9 @@ export const
                 handleFindMatch(io, socket, matchData);
             });
 
-            // socket.on("play_card", (data) => {
-            //     handlePlayCard(io, socket, data);
-            // });
-
-
-
-
+            socket.on("play_card", (data) => {
+                handlePlayCard(io, socket, data);
+            });
 
             // check user online or offline
             socket.on("join_game", (playerData) => {

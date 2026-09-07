@@ -2,7 +2,7 @@ import matchLobbies from "../../data/match_lobbies.js";
 import { findUserIdBySocket } from "../../utils/getUserIdBySocket.js";
 import { getUser } from "../../utils/getUserDataById.js";
 
-const PLAYERS_COUNT = 4;
+const MAX_LOBBY_PLAYERS = 8;
 
 export const handleCreateLobby = async (io, socket, data) => {
     console.log("create_lobby event received:", data);
@@ -145,7 +145,7 @@ export const handleCreateLobby = async (io, socket, data) => {
             lobbyId,
             ownerId: userId,
             entryFee,
-            playersCount: PLAYERS_COUNT,
+            playersCount: MAX_LOBBY_PLAYERS,
             players: lobby.players,
             status: "waiting",
             myCoins: user.coins,

@@ -3,7 +3,7 @@ import matchLobbies from "../../data/match_lobbies.js";
 import { findUserIdBySocket } from "../../utils/getUserIdBySocket.js";
 import { getUser } from "../../utils/getUserDataById.js";
 
-const PLAYERS_COUNT = 4;
+const MAX_LOBBY_PLAYERS = 8;
 
 export const handleAcceptInvite = async (io, socket, data) => {
     try {
@@ -92,7 +92,7 @@ export const handleAcceptInvite = async (io, socket, data) => {
                 lobbyId,
                 players: newLobby.players,
                 totalPlayers: newLobby.players.length,
-                requiredPlayers: PLAYERS_COUNT,
+                requiredPlayers: MAX_LOBBY_PLAYERS,
                 entryFee: newLobby.entryFee,
                 status: newLobby.status,
             });
@@ -103,7 +103,7 @@ export const handleAcceptInvite = async (io, socket, data) => {
         // ------------------------------------
         // 6. Check lobby full
         // ------------------------------------
-        if (newLobby.players.length >= PLAYERS_COUNT) {
+        if (newLobby.players.length >= MAX_LOBBY_PLAYERS) {
             socket.emit("lobby_error", {
                 type: "LOBBY_FULL",
                 message: "Lobby is full",
@@ -173,7 +173,7 @@ export const handleAcceptInvite = async (io, socket, data) => {
             lobbyId,
             players: newLobby.players,
             totalPlayers: newLobby.players.length,
-            requiredPlayers: PLAYERS_COUNT,
+                requiredPlayers: MAX_LOBBY_PLAYERS,
             entryFee: newLobby.entryFee,
             status: newLobby.status,
         });
@@ -187,7 +187,7 @@ export const handleAcceptInvite = async (io, socket, data) => {
             ownerId: newLobby.ownerId,
             players: newLobby.players,
             totalPlayers: newLobby.players.length,
-            requiredPlayers: PLAYERS_COUNT,
+            requiredPlayers: MAX_LOBBY_PLAYERS,
             entryFee: newLobby.entryFee,
             status: newLobby.status,
         });

@@ -117,8 +117,8 @@ export const handleFindMatch = async (io, socket, matchData) => {
         // ALREADY IN QUEUE
         // =========================
 
-        const alreadyQueued = matchmakingQueue.some(
-            (item) => item.lobbyId === lobby.lobbyId
+        const alreadyQueued = [...matchmakingQueue.values()].some((queue) =>
+            queue.some((item) => item.lobbyId === lobby.lobbyId)
         );
 
         if (alreadyQueued) {
@@ -328,6 +328,11 @@ export const handleFindMatch = async (io, socket, matchData) => {
             entryFee,
             tableCards: [],
             currentTurn,
+            leadSuit: null,
+            completedTricks: 0,
+            trickNumber: 1,
+            resolving: false,
+            undealtCards: deck,
             status: "started",
             createdAt: new Date(),
         };
@@ -394,6 +399,12 @@ export const handleFindMatch = async (io, socket, matchData) => {
                 cards: player.cards,
             });
         }
+
+        io.to(roomId).emit("game_started", {
+            roomId,
+            playersCount,
+            currentTurn,
+        });
 
         // =========================
         // DELETE USED LOBBIES
