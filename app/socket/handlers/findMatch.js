@@ -1,132 +1,144 @@
-import User from "../../modules/user/model.js";
+import onlineUsers from "../../data/online_players.js";
 import matchLobbies from "../../data/match_lobbies.js";
 import matchmakingQueue from "../../data/matchmaking_queue.js";
-import rooms from "../../data/game_rooms.js";
-import { findUserIdBySocket } from "../../utils/getUserIdBySocket.js";
+import rooms from "../../data/match_rooms.js";
 import { createDeck, shuffleDeck } from "../../game/cards.js";
 
-const PLAYERS_COUNT = 4;
+const MIN_PLAYERS = 4;
+const MAX_PLAYERS = 8;
 
-// ======================================================
-// FIND MATCH
-// ======================================================
-
-export const handleFindMatch = async (io, socket, data) => {
+export const handleFindMatch = async (io, socket, matchData) => {
     try {
-        const { lobbyId } = data || {};
-
-        // ==========================================
-        // FIND USER
-        // ==========================================
-
-        const userId = findUserIdBySocket(socket.id);
+        const userId = [...onlineUsers.entries()]
+            .find(([, player]) => player.socketId === socket.id)?.[0];
 
         if (!userId) {
             socket.emit("match_error", {
                 type: "USER_NOT_FOUND",
                 message: "User not found",
             });
-
             return;
         }
 
-        // ==========================================
-        // FIND LOBBY
-        // ==========================================
+        const entryFee = Number(matchData?.entryFee);
+        const playersCount = Number(matchData?.playersCount);
 
-        const lobby = matchLobbies.get(lobbyId);
+        // =========================
+        // VALIDATE MATCH DATA
+        // =========================
+
+        if (!Number.isFinite(entryFee) || entryFee < 0) {
+            socket.emit("match_error", {
+                type: "INVALID_ENTRY_FEE",
+                message: "Invalid entry fee",
+            });
+            return;
+        }
+
+        if (
+            !Number.isInteger(playersCount) ||
+            playersCount < MIN_PLAYERS ||
+            playersCount > MAX_PLAYERS
+        ) {
+            socket.emit("match_error", {
+                type: "INVALID_PLAYERS_COUNT",
+                message: "Players count must be between 4 and 8",
+            });
+            return;
+        }
+
+        // =========================
+        // FIND USER LOBBY
+        // =========================
+
+        const lobby = [...matchLobbies.values()].find((lobby) =>
+            lobby.players.some(
+                (player) => player.userId === userId
+            )
+        );
 
         if (!lobby) {
             socket.emit("match_error", {
                 type: "LOBBY_NOT_FOUND",
-                message: "Lobby not found",
+                message: "You are not in a lobby",
             });
-
             return;
         }
 
-        // ==========================================
-        // ONLY OWNER CAN START
-        // ==========================================
+        // =========================
+        // ONLY LOBBY OWNER
+        // =========================
 
         if (lobby.ownerId !== userId) {
             socket.emit("match_error", {
-                type: "NOT_OWNER",
-                message: "Only lobby owner can find match",
+                type: "NOT_LOBBY_OWNER",
+                message: "Only lobby owner can find a match",
             });
-
             return;
         }
 
-        // ==========================================
-        // ALREADY SEARCHING
-        // ==========================================
+        // =========================
+        // LOBBY STATUS
+        // =========================
 
-        if (lobby.status === "searching") {
-            return;
-        }
-
-        // ==========================================
-        // CHECK PLAYERS
-        // ==========================================
-
-        if (lobby.players.length === 0) {
+        if (lobby.status !== "waiting") {
             socket.emit("match_error", {
-                type: "NO_PLAYERS",
-                message: "No players in lobby",
+                type: "INVALID_LOBBY_STATUS",
+                message: "Lobby is already searching or started",
             });
-
             return;
         }
 
-        // ==========================================
-        // VERIFY ALL PLAYERS BALANCE
-        // ==========================================
+        // =========================
+        // CHECK LOBBY ENTRY FEE
+        // =========================
 
-        const users = await User.find({
-            _id: {
-                $in: lobby.players.map((player) => player.userId),
-            },
-        }).select("_id coins name");
+        if (Number(lobby.entryFee) !== entryFee) {
+            socket.emit("match_error", {
+                type: "ENTRY_FEE_MISMATCH",
+                message: "Entry fee does not match lobby",
+            });
+            return;
+        }
 
-        const userMap = new Map(
-            users.map((user) => [user._id.toString(), user])
+        // =========================
+        // CHECK PLAYERS COUNT
+        // =========================
+
+        if (lobby.players.length > playersCount) {
+            socket.emit("match_error", {
+                type: "TOO_MANY_PLAYERS",
+                message: "Lobby has more players than selected match size",
+            });
+            return;
+        }
+
+        // =========================
+        // ALREADY IN QUEUE
+        // =========================
+
+        const alreadyQueued = matchmakingQueue.some(
+            (item) => item.lobbyId === lobby.lobbyId
         );
 
-        const requiredCoins = Number(lobby.entryFee) || 0;
+        if (alreadyQueued) {
+            socket.emit("match_status", {
+                status: "searching",
+                lobbyId: lobby.lobbyId,
+                entryFee,
+                playersCount,
+            });
 
-        for (const player of lobby.players) {
-            const dbUser = userMap.get(String(player.userId));
-
-            if (!dbUser) {
-                socket.emit("match_error", {
-                    type: "USER_NOT_FOUND",
-                    message: `Player ${player.name} not found`,
-                });
-
-                return;
-            }
-
-            if (dbUser.coins < requiredCoins) {
-                socket.emit("match_error", {
-                    type: "INSUFFICIENT_COINS",
-                    message: `${player.name} does not have enough coins.`,
-                    userId: player.userId,
-                    requiredCoins,
-                    availableCoins: dbUser.coins,
-                });
-
-                return;
-            }
+            return;
         }
 
-        // ==========================================
-        // MARK LOBBY AS SEARCHING
-        // ==========================================
+        // =========================
+        // QUEUE KEY
+        // =========================
+        // Same entry fee + same target
+        // players count only.
 
-        lobby.status = "searching";
-
-        const queueKey = String(lobby.entryFee);
+        const queueKey = `${entryFee}_${playersCount}`;
 
         if (!matchmakingQueue.has(queueKey)) {
             matchmakingQueue.set(queueKey, []);
@@ -134,479 +146,278 @@ export const handleFindMatch = async (io, socket, data) => {
 
         const queue = matchmakingQueue.get(queueKey);
 
-        if (!queue.includes(lobbyId)) {
-            queue.push(lobbyId);
-        }
+        // =========================
+        // ADD LOBBY TO QUEUE
+        // =========================
 
-        // ==========================================
-        // PLAYER COUNT
-        // ==========================================
-
-        const currentPlayers = lobby.players.length;
-        const needPlayers = PLAYERS_COUNT - currentPlayers;
-
-        // ==========================================
-        // NOTIFY LOBBY
-        // ==========================================
-
-        io.to(lobbyId).emit("match_searching", {
-            lobbyId,
-            currentPlayers,
-            requiredPlayers: PLAYERS_COUNT,
-            needPlayers,
-            entryFee: lobby.entryFee,
-            status: "searching",
+        queue.push({
+            lobbyId: lobby.lobbyId,
+            playersCount: lobby.players.length,
         });
 
-        console.log(
-            `🔎 Lobby ${lobbyId} searching (${currentPlayers}/${PLAYERS_COUNT})`
-        );
+        lobby.status = "searching";
 
-        // ==========================================
-        // TRY CREATE MATCH
-        // ==========================================
+        console.log("=================================");
+        console.log("LOBBY ADDED TO MATCHMAKING");
+        console.log("Queue Key:", queueKey);
+        console.log("Lobby:", lobby.lobbyId);
+        console.log("Lobby Players:", lobby.players.length);
+        console.log("Required Players:", playersCount);
+        console.log("=================================");
 
-        await tryCreateMatch(io, queueKey);
-    } catch (error) {
-        console.error("❌ find_match error:", error);
+        // =========================
+        // FIND LOBBIES WHOSE TOTAL
+        // PLAYERS == TARGET
+        // =========================
 
-        socket.emit("match_error", {
-            type: "SERVER_ERROR",
-            message: "Unable to find match",
-        });
-    }
-};
+        let selectedLobbies = [];
+        let totalPlayers = 0;
 
-// ======================================================
-// MATCHMAKING
-// ======================================================
+        /*
+         * Example:
+         *
+         * Target = 4
+         * 2 + 2 = 4
+         *
+         * Target = 6
+         * 3 + 3 = 6
+         * 4 + 2 = 6
+         *
+         * Target = 8
+         * 4 + 4 = 8
+         * 3 + 2 + 3 = 8
+         *
+         * A lobby is NEVER split.
+         */
 
-const tryCreateMatch = async (io, queueKey) => {
-    const queue = matchmakingQueue.get(queueKey);
+        for (const queuedLobby of queue) {
+            const lobbyPlayers = queuedLobby.playersCount;
 
-    if (!queue || queue.length === 0) {
-        return;
-    }
-
-    let selectedLobbies = [];
-    let totalPlayers = 0;
-
-    // ==========================================
-    // FIND COMPATIBLE LOBBIES
-    // ==========================================
-
-    for (const lobbyId of queue) {
-        const lobby = matchLobbies.get(lobbyId);
-
-        if (!lobby) {
-            continue;
-        }
-
-        if (lobby.status !== "searching") {
-            continue;
-        }
-
-        const count = lobby.players.length;
-
-        if (totalPlayers + count <= PLAYERS_COUNT) {
-            selectedLobbies.push(lobby);
-            totalPlayers += count;
-        }
-
-        if (totalPlayers === PLAYERS_COUNT) {
-            break;
-        }
-    }
-
-    // ==========================================
-    // NOT ENOUGH PLAYERS
-    // ==========================================
-
-    if (totalPlayers < PLAYERS_COUNT) {
-        console.log(
-            `⏳ Queue ${queueKey}: ${totalPlayers}/${PLAYERS_COUNT}`
-        );
-
-        return;
-    }
-
-    // ==========================================
-    // REMOVE SELECTED LOBBIES FROM QUEUE
-    // ==========================================
-
-    for (const lobby of selectedLobbies) {
-        const index = queue.indexOf(lobby.lobbyId);
-
-        if (index !== -1) {
-            queue.splice(index, 1);
-        }
-    }
-
-    if (queue.length === 0) {
-        matchmakingQueue.delete(queueKey);
-    }
-
-    // ==========================================
-    // COMBINE PLAYERS
-    // ==========================================
-
-    const roomPlayers = selectedLobbies.flatMap(
-        (lobby) => lobby.players
-    );
-
-    console.log(
-        `🎮 Match found: ${roomPlayers.length}/${PLAYERS_COUNT}`
-    );
-
-    // ==========================================
-    // FINAL COIN CHECK + DEDUCT
-    // ==========================================
-
-    const deductionResult = await deductMatchCoins(
-        roomPlayers,
-        selectedLobbies[0].entryFee
-    );
-
-    if (!deductionResult.success) {
-        console.log("❌ Coin deduction failed");
-
-        for (const lobby of selectedLobbies) {
-            lobby.status = "waiting";
-
-            io.to(lobby.lobbyId).emit("match_error", {
-                type: deductionResult.type,
-                message: deductionResult.message,
-            });
-        }
-
-        return;
-    }
-
-    // ==========================================
-    // CREATE GAME ROOM
-    // ==========================================
-
-    try {
-        await createGameRoom(
-            io,
-            roomPlayers,
-            selectedLobbies[0].entryFee
-        );
-
-        // ======================================
-        // REMOVE LOBBIES
-        // ======================================
-
-        for (const lobby of selectedLobbies) {
-            matchLobbies.delete(lobby.lobbyId);
-        }
-    } catch (error) {
-        console.error("❌ Room creation failed:", error);
-
-        // ======================================
-        // REFUND COINS
-        // ======================================
-
-        await refundMatchCoins(
-            roomPlayers,
-            selectedLobbies[0].entryFee
-        );
-
-        // ======================================
-        // RESTORE LOBBIES
-        // ======================================
-
-        for (const lobby of selectedLobbies) {
-            lobby.status = "waiting";
-
-            io.to(lobby.lobbyId).emit("match_error", {
-                type: "ROOM_CREATION_FAILED",
-                message: "Unable to create room. Coins refunded.",
-            });
-        }
-    }
-};
-
-// ======================================================
-// ATOMIC COIN DEDUCTION
-// ======================================================
-
-const deductMatchCoins = async (players, entryFee) => {
-    const userIds = players.map((player) => player.userId);
-    const updatedUsers = [];
-
-    try {
-        for (const userId of userIds) {
-            const updatedUser = await User.findOneAndUpdate(
-                {
-                    _id: userId,
-                    coins: {
-                        $gte: entryFee,
-                    },
-                },
-                {
-                    $inc: {
-                        coins: -entryFee,
-                    },
-                },
-                {
-                    new: true,
-                }
-            );
-
-            // ======================================
-            // INSUFFICIENT COINS
-            // ======================================
-
-            if (!updatedUser) {
-                for (const deductedUserId of updatedUsers) {
-                    await User.updateOne(
-                        {
-                            _id: deductedUserId,
-                        },
-                        {
-                            $inc: {
-                                coins: entryFee,
-                            },
-                        }
-                    );
-                }
-
-                return {
-                    success: false,
-                    type: "INSUFFICIENT_COINS",
-                    message:
-                        "One or more players do not have enough coins.",
-                };
+            if (
+                totalPlayers + lobbyPlayers <= playersCount
+            ) {
+                selectedLobbies.push(queuedLobby);
+                totalPlayers += lobbyPlayers;
             }
 
-            updatedUsers.push(userId);
-        }
-
-        return {
-            success: true,
-        };
-    } catch (error) {
-        console.error("❌ Coin deduction error:", error);
-
-        // ==========================================
-        // REFUND IF ERROR
-        // ==========================================
-
-        for (const userId of updatedUsers) {
-            try {
-                await User.updateOne(
-                    {
-                        _id: userId,
-                    },
-                    {
-                        $inc: {
-                            coins: entryFee,
-                        },
-                    }
-                );
-            } catch (refundError) {
-                console.error(
-                    "❌ CRITICAL REFUND ERROR:",
-                    refundError
-                );
+            if (totalPlayers === playersCount) {
+                break;
             }
         }
 
-        return {
-            success: false,
-            type: "COIN_TRANSACTION_FAILED",
-            message: "Coin deduction failed.",
-        };
-    }
-};
+        // =========================
+        // NOT ENOUGH PLAYERS
+        // =========================
 
-// ======================================================
-// REFUND MATCH COINS
-// ======================================================
+        if (totalPlayers !== playersCount) {
+            io.to(lobby.lobbyId).emit("match_status", {
+                status: "searching",
+                lobbyId: lobby.lobbyId,
+                players: totalPlayers,
+                requiredPlayers: playersCount,
+                entryFee,
+            });
 
-const refundMatchCoins = async (players, entryFee) => {
-    for (const player of players) {
-        try {
-            await User.updateOne(
-                {
-                    _id: player.userId,
-                },
-                {
-                    $inc: {
-                        coins: entryFee,
-                    },
-                }
+            return;
+        }
+
+        // =========================
+        // REMOVE SELECTED LOBBIES
+        // FROM QUEUE
+        // =========================
+
+        for (const selected of selectedLobbies) {
+            const index = queue.findIndex(
+                (item) => item.lobbyId === selected.lobbyId
             );
-        } catch (error) {
+
+            if (index !== -1) {
+                queue.splice(index, 1);
+            }
+        }
+
+        if (queue.length === 0) {
+            matchmakingQueue.delete(queueKey);
+        }
+
+        // =========================
+        // GET ALL PLAYERS
+        // =========================
+
+        const roomPlayers = [];
+
+        for (const selected of selectedLobbies) {
+            const selectedLobby = matchLobbies.get(selected.lobbyId);
+
+            if (!selectedLobby) {
+                continue;
+            }
+
+            for (const player of selectedLobby.players) {
+                roomPlayers.push({
+                    userId: player.userId,
+                    name: player.name,
+                    socketId: player.socketId,
+                });
+            }
+        }
+
+        // Safety check
+        if (roomPlayers.length !== playersCount) {
             console.error(
-                `❌ Refund failed for ${player.userId}`,
-                error
+                "Room player count mismatch:",
+                roomPlayers.length,
+                playersCount
             );
+
+            return;
         }
-    }
-};
 
-// ======================================================
-// CREATE GAME ROOM
-// ======================================================
+        // =========================
+        // CREATE ROOM
+        // =========================
 
-const createGameRoom = async (
-    io,
-    lobbyPlayers,
-    entryFee
-) => {
-    if (lobbyPlayers.length !== PLAYERS_COUNT) {
-        throw new Error(
-            `Room requires exactly ${PLAYERS_COUNT} players`
+        const roomId =
+            `room_${Date.now()}_${Math.random()
+                .toString(36)
+                .slice(2, 8)}`;
+
+        // =========================
+        // SHUFFLE + DEAL CARDS
+        // =========================
+
+        const deck = shuffleDeck(createDeck());
+
+        const cardsPerPlayer =
+            Math.floor(deck.length / playersCount);
+
+        const players = roomPlayers.map(
+            (player, index) => ({
+                userId: player.userId,
+                name: player.name,
+                socketId: player.socketId,
+                seat: index + 1,
+                cards: deck.splice(0, cardsPerPlayer),
+            })
         );
-    }
 
-    // ==========================================
-    // CREATE ROOM ID
-    // ==========================================
+        // =========================
+        // FIND ACE OF SPADES
+        // =========================
 
-    const roomId =
-        `room_${Date.now()}_${Math.random()
-            .toString(36)
-            .slice(2, 8)}`;
+        const firstPlayer = players.find((player) =>
+            player.cards.some(
+                (card) =>
+                    card.rank === 1 &&
+                    card.suit === "spades"
+            )
+        );
 
-    // ==========================================
-    // CREATE + SHUFFLE DECK
-    // ==========================================
+        const currentTurn = firstPlayer
+            ? firstPlayer.seat
+            : 1;
 
-    const deck = shuffleDeck(createDeck());
+        // =========================
+        // CREATE ROOM OBJECT
+        // =========================
 
-    const cardsPerPlayer = Math.floor(
-        deck.length / PLAYERS_COUNT
-    );
+        const room = {
+            roomId,
+            players,
+            playersCount,
+            entryFee,
+            tableCards: [],
+            currentTurn,
+            status: "started",
+            createdAt: new Date(),
+        };
 
-    // ==========================================
-    // CREATE PLAYERS
-    // ==========================================
+        rooms.set(roomId, room);
 
-    const players = lobbyPlayers.map(
-        (player, index) => {
+        console.log("=================================");
+        console.log("MATCH FOUND");
+        console.log("Room:", roomId);
+        console.log("Entry Fee:", entryFee);
+        console.log("Required Players:", playersCount);
+        console.log("Players:", players);
+        console.log("First Turn:", currentTurn);
+        console.log("=================================");
+
+        // =========================
+        // JOIN SOCKET ROOM
+        // =========================
+
+        const publicPlayers = players.map(
+            ({
+                userId,
+                name,
+                seat,
+            }) => ({
+                userId,
+                name,
+                seat,
+            })
+        );
+
+        for (const player of players) {
             const playerSocket =
                 io.sockets.sockets.get(
                     player.socketId
                 );
 
             if (!playerSocket) {
-                throw new Error(
-                    `Player disconnected: ${player.userId}`
-                );
+                continue;
             }
 
-            return {
-                userId: player.userId,
-                name: player.name,
-                avatar: player.avatar,
-                flag: player.flag,
-                level: player.level,
-                socketId: player.socketId,
-                seat: index + 1,
-                cards: deck.splice(
-                    0,
-                    cardsPerPlayer
-                ),
-            };
+            playerSocket.join(roomId);
+
+            // =========================
+            // MATCH STARTED
+            // =========================
+
+            playerSocket.emit("match_started", {
+                roomId,
+                yourUserId: player.userId,
+                yourSeat: player.seat,
+                players: publicPlayers,
+                playersCount,
+                entryFee,
+                currentTurn,
+            });
+
+            // =========================
+            // ONLY THIS PLAYER'S CARDS
+            // =========================
+
+            playerSocket.emit("your_cards", {
+                roomId,
+                cards: player.cards,
+            });
         }
-    );
 
-    // ==========================================
-    // CREATE ROOM OBJECT
-    // ==========================================
+        // =========================
+        // DELETE USED LOBBIES
+        // =========================
 
-    const room = {
-        roomId,
-        players,
-        playersCount: PLAYERS_COUNT,
-        entryFee,
-        tableCards: [],
-        currentTurn: 1,
-        status: "started",
-        createdAt: new Date(),
-    };
-
-    rooms.set(roomId, room);
-
-    // ==========================================
-    // PUBLIC PLAYER DATA
-    // ==========================================
-
-    const publicPlayers = players.map(
-        ({
-            userId,
-            name,
-            avatar,
-            flag,
-            level,
-            seat,
-        }) => ({
-            userId,
-            name,
-            avatar,
-            flag,
-            level,
-            seat,
-        })
-    );
-
-    // ==========================================
-    // JOIN SOCKET.IO ROOM
-    // ==========================================
-
-    for (const player of players) {
-        const playerSocket =
-            io.sockets.sockets.get(
-                player.socketId
+        for (const selected of selectedLobbies) {
+            matchLobbies.delete(
+                selected.lobbyId
             );
+        }
 
-        playerSocket.join(roomId);
-    }
+        console.log(
+            `Room ${roomId} started with ${players.length} players`
+        );
 
-    // ==========================================
-    // ROOM CREATED
-    // ==========================================
+    } catch (error) {
+        console.error(
+            "handleFindMatch error:",
+            error
+        );
 
-    io.to(roomId).emit("room_created", {
-        roomId,
-        players: publicPlayers,
-        playersCount: PLAYERS_COUNT,
-        entryFee,
-    });
-
-    // ==========================================
-    // SEND GAME DATA
-    // ==========================================
-
-    for (const player of players) {
-        const playerSocket =
-            io.sockets.sockets.get(
-                player.socketId
-            );
-
-        playerSocket.emit("match_started", {
-            roomId,
-            yourUserId: player.userId,
-            yourSeat: player.seat,
-            players: publicPlayers,
-            playersCount: PLAYERS_COUNT,
-            entryFee,
-            currentTurn: room.currentTurn,
-        });
-
-        // Only this player's cards
-        playerSocket.emit("your_cards", {
-            roomId,
-            cards: player.cards,
+        socket.emit("match_error", {
+            type: "SERVER_ERROR",
+            message: "Something went wrong",
         });
     }
-
-    console.log(`✅ Room ${roomId} started`);
-    console.log(`👥 Players: ${players.length}/${PLAYERS_COUNT}`);
-    console.log(`🪙 Entry: ${entryFee}`);
-
-    return room;
 };

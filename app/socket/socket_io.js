@@ -1,7 +1,7 @@
 import { Server } from "socket.io";
 import { handleJoinGame } from "./handlers/joinGame.js";
 import { handleFindMatch } from "./handlers/findMatch.js";
-import { handlePlayCard } from "./handlers/playCard.js";
+// import { handlePlayCard } from "./handlers/playCard.js";
 import { handleDisconnect } from "./handlers/disconnect.js";
 import { handleCreateLobby } from "./handlers/createLobby.js";
 import { registerSocketIO } from "./handlers/friendEvents.js";
@@ -48,13 +48,15 @@ export const
                 handleExitOnLobby(io, socket, data);
             });
 
+            // Matchmaking and game events
+
             socket.on("find_match", (matchData) => {
                 handleFindMatch(io, socket, matchData);
             });
 
-            socket.on("play_card", (data) => {
-                handlePlayCard(io, socket, data);
-            });
+            // socket.on("play_card", (data) => {
+            //     handlePlayCard(io, socket, data);
+            // });
 
 
 
