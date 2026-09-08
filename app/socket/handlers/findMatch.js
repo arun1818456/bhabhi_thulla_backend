@@ -7,6 +7,205 @@ import { createDeck, shuffleDeck } from "../../game/cards.js";
 const MIN_PLAYERS = 4;
 const MAX_PLAYERS = 8;
 
+const broadcastLobbySearchState = (io, lobby, playersCount, entryFee, status = "searching") => {
+    io.to(lobby.lobbyId).emit("lobby_updated", {
+        lobbyId: lobby.lobbyId,
+        ownerId: lobby.ownerId,
+        players: lobby.players,
+        totalPlayers: lobby.players.length,
+        requiredPlayers: playersCount,
+        entryFee: lobby.entryFee,
+        status: lobby.status,
+        matchStatus: status,
+    });
+
+    io.to(lobby.lobbyId).emit("match_status", {
+        status,
+        lobbyId: lobby.lobbyId,
+        players: lobby.players.length,
+        requiredPlayers: playersCount,
+        entryFee,
+    });
+};
+
+const syncLobbyPlayersFromSocketRoom = (io, lobby) => {
+    const room = io.sockets.adapter.rooms.get(lobby.lobbyId);
+
+    if (!room) {
+        return lobby.players;
+    }
+
+    const syncedPlayers = [];
+    const uniqueUserIds = new Set();
+
+    for (const socketId of room) {
+        const userId = [...onlineUsers.entries()].find(
+            ([, player]) => player.socketId === socketId
+        )?.[0];
+
+        if (!userId) {
+            continue;
+        }
+
+        if (uniqueUserIds.has(userId)) {
+            continue;
+        }
+
+        const existingPlayer = lobby.players.find((player) => player.userId === userId);
+        if (existingPlayer) {
+            syncedPlayers.push(existingPlayer);
+            uniqueUserIds.add(userId);
+            continue;
+        }
+
+        const socket = io.sockets.sockets.get(socketId);
+        if (!socket) {
+            continue;
+        }
+
+        const player = {
+            userId,
+            name: socket.user?.name || socket.user?.userName || `Player_${userId}`,
+            avatar: socket.user?.avatar,
+            flag: socket.user?.flag,
+            level: socket.user?.level,
+            socketId,
+            seat: syncedPlayers.length + 1,
+        };
+
+        syncedPlayers.push(player);
+        uniqueUserIds.add(userId);
+    }
+
+    lobby.players = syncedPlayers;
+    return syncedPlayers;
+};
+
+const mergeLobbyIntoExistingSearchingLobby = (io, lobby, queue, playersCount, entryFee) => {
+    const targetLobby = [...matchLobbies.values()].find(
+        (candidate) =>
+            candidate.lobbyId !== lobby.lobbyId &&
+            candidate.entryFee === entryFee &&
+            candidate.status === "searching" &&
+            candidate.players.length < playersCount
+    );
+
+    if (!targetLobby) {
+        return false;
+    }
+
+    syncLobbyPlayersFromSocketRoom(io, lobby);
+    syncLobbyPlayersFromSocketRoom(io, targetLobby);
+
+    const mergedPlayers = [...targetLobby.players];
+    const existingUserIds = new Set(mergedPlayers.map((player) => player.userId));
+
+    for (const player of lobby.players) {
+        if (!existingUserIds.has(player.userId)) {
+            mergedPlayers.push({
+                ...player,
+                seat: mergedPlayers.length + 1,
+            });
+            existingUserIds.add(player.userId);
+        }
+
+        const playerSocket = io.sockets.sockets.get(player.socketId);
+        if (playerSocket) {
+            playerSocket.leave(lobby.lobbyId);
+            playerSocket.join(targetLobby.lobbyId);
+        }
+    }
+
+    targetLobby.players = mergedPlayers;
+    targetLobby.status = "searching";
+
+    const currentQueueItemIndex = queue.findIndex((item) => item.lobbyId === lobby.lobbyId);
+    if (currentQueueItemIndex !== -1) {
+        queue.splice(currentQueueItemIndex, 1);
+    }
+
+    const targetQueueItem = queue.find((item) => item.lobbyId === targetLobby.lobbyId);
+    if (targetQueueItem) {
+        targetQueueItem.playersCount = targetLobby.players.length;
+    } else {
+        queue.push({
+            lobbyId: targetLobby.lobbyId,
+            playersCount: targetLobby.players.length,
+        });
+    }
+
+    matchLobbies.delete(lobby.lobbyId);
+
+    io.to(targetLobby.lobbyId).emit("lobby_updated", {
+        lobbyId: targetLobby.lobbyId,
+        ownerId: targetLobby.ownerId,
+        players: targetLobby.players,
+        totalPlayers: targetLobby.players.length,
+        requiredPlayers: playersCount,
+        entryFee: targetLobby.entryFee,
+        status: targetLobby.status,
+    });
+
+    return true;
+};
+
+const mergeSelectedLobbiesIntoPrimary = (io, selectedLobbies) => {
+    if (!selectedLobbies.length) {
+        return null;
+    }
+
+    const primaryLobbyId = selectedLobbies[0].lobbyId;
+    const primaryLobby = matchLobbies.get(primaryLobbyId);
+
+    if (!primaryLobby) {
+        return null;
+    }
+
+    syncLobbyPlayersFromSocketRoom(io, primaryLobby);
+
+    const existingUserIds = new Set(
+        primaryLobby.players.map((player) => player.userId)
+    );
+
+    for (const selected of selectedLobbies.slice(1)) {
+        const otherLobby = matchLobbies.get(selected.lobbyId);
+
+        if (!otherLobby || otherLobby.lobbyId === primaryLobbyId) {
+            continue;
+        }
+
+        syncLobbyPlayersFromSocketRoom(io, otherLobby);
+
+        for (const player of otherLobby.players) {
+            if (!existingUserIds.has(player.userId)) {
+                primaryLobby.players.push({
+                    ...player,
+                    seat: primaryLobby.players.length + 1,
+                });
+                existingUserIds.add(player.userId);
+            }
+
+            const socket = io.sockets.sockets.get(player.socketId);
+            if (socket) {
+                socket.leave(otherLobby.lobbyId);
+                socket.join(primaryLobbyId);
+            }
+        }
+
+        io.to(primaryLobbyId).emit("lobby_updated", {
+            lobbyId: primaryLobbyId,
+            ownerId: primaryLobby.ownerId,
+            players: primaryLobby.players,
+            totalPlayers: primaryLobby.players.length,
+            requiredPlayers: primaryLobby.players.length,
+            entryFee: primaryLobby.entryFee,
+            status: primaryLobby.status,
+        });
+    }
+
+    return primaryLobby;
+};
+
 export const handleFindMatch = async (io, socket, matchData) => {
     try {
         const userId = [...onlineUsers.entries()]
@@ -20,8 +219,33 @@ export const handleFindMatch = async (io, socket, matchData) => {
             return;
         }
 
-        const entryFee = Number(matchData?.entryFee);
-        const playersCount = Number(matchData?.playersCount);
+        // =========================
+        // FIND USER LOBBY
+        // =========================
+
+        const lobby = [...matchLobbies.values()].find((lobby) =>
+            lobby.players.some(
+                (player) => player.userId === userId
+            )
+        );
+
+        if (!lobby) {
+            socket.emit("match_error", {
+                type: "LOBBY_NOT_FOUND",
+                message: "You are not in a lobby",
+            });
+            return;
+        }
+
+        syncLobbyPlayersFromSocketRoom(io, lobby);
+
+        const entryFee = Number.isFinite(Number(matchData?.entryFee))
+            ? Number(matchData.entryFee)
+            : Number(lobby.entryFee);
+
+        const playersCount = Number.isInteger(Number(matchData?.playersCount))
+            ? Number(matchData.playersCount)
+            : Number(lobby.players.length) || MIN_PLAYERS;
 
         // =========================
         // VALIDATE MATCH DATA
@@ -43,24 +267,6 @@ export const handleFindMatch = async (io, socket, matchData) => {
             socket.emit("match_error", {
                 type: "INVALID_PLAYERS_COUNT",
                 message: "Players count must be between 4 and 8",
-            });
-            return;
-        }
-
-        // =========================
-        // FIND USER LOBBY
-        // =========================
-
-        const lobby = [...matchLobbies.values()].find((lobby) =>
-            lobby.players.some(
-                (player) => player.userId === userId
-            )
-        );
-
-        if (!lobby) {
-            socket.emit("match_error", {
-                type: "LOBBY_NOT_FOUND",
-                message: "You are not in a lobby",
             });
             return;
         }
@@ -122,12 +328,10 @@ export const handleFindMatch = async (io, socket, matchData) => {
         );
 
         if (alreadyQueued) {
-            socket.emit("match_status", {
-                status: "searching",
-                lobbyId: lobby.lobbyId,
-                entryFee,
-                playersCount,
-            });
+            console.log(`Lobby ${lobby.lobbyId} is already in queue; broadcasting searching state to all lobby members`);
+
+            lobby.status = "searching";
+            broadcastLobbySearchState(io, lobby, playersCount, entryFee, "searching");
 
             return;
         }
@@ -157,6 +361,36 @@ export const handleFindMatch = async (io, socket, matchData) => {
 
         lobby.status = "searching";
 
+        const mergedIntoExistingLobby = mergeLobbyIntoExistingSearchingLobby(
+            io,
+            lobby,
+            queue,
+            playersCount,
+            entryFee
+        );
+
+        if (mergedIntoExistingLobby) {
+            const activeLobby = [...matchLobbies.values()].find(
+                (candidate) => candidate.lobbyId === lobby.lobbyId
+            ) || [...matchLobbies.values()].find(
+                (candidate) => candidate.entryFee === entryFee && candidate.status === "searching"
+            );
+
+            if (activeLobby) {
+                activeLobby.status = "searching";
+                broadcastLobbySearchState(io, activeLobby, playersCount, entryFee, "searching");
+            }
+
+            return;
+        }
+
+        io.to(lobby.lobbyId).emit("lobby_searching", {
+            lobbyId: lobby.lobbyId,
+            players: lobby.players.length,
+            requiredPlayers: playersCount,
+        });
+
+        broadcastLobbySearchState(io, lobby, playersCount, entryFee, "searching");
         console.log("=================================");
         console.log("LOBBY ADDED TO MATCHMAKING");
         console.log("Queue Key:", queueKey);
@@ -210,13 +444,8 @@ export const handleFindMatch = async (io, socket, matchData) => {
         // =========================
 
         if (totalPlayers !== playersCount) {
-            io.to(lobby.lobbyId).emit("match_status", {
-                status: "searching",
-                lobbyId: lobby.lobbyId,
-                players: totalPlayers,
-                requiredPlayers: playersCount,
-                entryFee,
-            });
+            lobby.status = "searching";
+            broadcastLobbySearchState(io, lobby, playersCount, entryFee, "searching");
 
             return;
         }
@@ -244,21 +473,29 @@ export const handleFindMatch = async (io, socket, matchData) => {
         // GET ALL PLAYERS
         // =========================
 
+        const primaryLobby = mergeSelectedLobbiesIntoPrimary(io, selectedLobbies);
+
         const roomPlayers = [];
+        const seenUserIds = new Set();
 
         for (const selected of selectedLobbies) {
-            const selectedLobby = matchLobbies.get(selected.lobbyId);
+            const selectedLobby = matchLobbies.get(selected.lobbyId) || primaryLobby;
 
             if (!selectedLobby) {
                 continue;
             }
 
             for (const player of selectedLobby.players) {
+                if (seenUserIds.has(player.userId)) {
+                    continue;
+                }
+
                 roomPlayers.push({
                     userId: player.userId,
                     name: player.name,
                     socketId: player.socketId,
                 });
+                seenUserIds.add(player.userId);
             }
         }
 
@@ -366,19 +603,13 @@ export const handleFindMatch = async (io, socket, matchData) => {
 
         for (const player of players) {
             const playerSocket =
-                io.sockets.sockets.get(
-                    player.socketId
-                );
+                io.sockets.sockets.get(player.socketId);
 
             if (!playerSocket) {
                 continue;
             }
 
             playerSocket.join(roomId);
-
-            // =========================
-            // MATCH STARTED
-            // =========================
 
             playerSocket.emit("match_started", {
                 roomId,
@@ -390,16 +621,11 @@ export const handleFindMatch = async (io, socket, matchData) => {
                 currentTurn,
             });
 
-            // =========================
-            // ONLY THIS PLAYER'S CARDS
-            // =========================
-
             playerSocket.emit("your_cards", {
                 roomId,
                 cards: player.cards,
             });
         }
-
         io.to(roomId).emit("game_started", {
             roomId,
             playersCount,
@@ -411,9 +637,13 @@ export const handleFindMatch = async (io, socket, matchData) => {
         // =========================
 
         for (const selected of selectedLobbies) {
-            matchLobbies.delete(
-                selected.lobbyId
-            );
+            if (selected.lobbyId !== (primaryLobby?.lobbyId || selected.lobbyId)) {
+                matchLobbies.delete(selected.lobbyId);
+            }
+        }
+
+        if (primaryLobby) {
+            matchLobbies.delete(primaryLobby.lobbyId);
         }
 
         console.log(
