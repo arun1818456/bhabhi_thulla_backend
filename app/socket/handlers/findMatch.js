@@ -594,10 +594,16 @@ export const handleFindMatch = async (io, socket, matchData) => {
                 userId,
                 name,
                 seat,
+                avatar,
+                flag,
+                level,
             }) => ({
                 userId,
                 name,
                 seat,
+                avatar,
+                flag,
+                level,
             })
         );
 
@@ -613,19 +619,18 @@ export const handleFindMatch = async (io, socket, matchData) => {
 
             playerSocket.emit("match_started", {
                 roomId,
-                yourUserId: player.userId,
                 yourSeat: player.seat,
                 players: publicPlayers,
                 playersCount,
                 entryFee,
                 currentTurn,
-            });
-
-            playerSocket.emit("your_cards", {
-                roomId,
-                cards: player.cards,
+                tableCards: [],
+                myCards: player.cards,
             });
         }
+
+        await delay(5000);
+
         io.to(roomId).emit("game_started", {
             roomId,
             playersCount,
