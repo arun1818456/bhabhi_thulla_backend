@@ -86,35 +86,19 @@ const findTrickWinner = (room) => {
     return null;
   }
 
-  /*
-   * IMPORTANT:
-   *
-   * Only lead-suit cards participate
-   * in winner calculation.
-   *
-   * Example:
-   *
-   * A -> 10 Hearts
-   * B -> K Hearts
-   * C -> 7 Clubs (Thulla)
-   *
-   * Winner = B
-   *
-   * 7 Clubs is ignored.
-   */
-
-  const validCards = room.tableCards.filter(
-    (played) => played.card?.suit === leadSuit
+  const leadSuitCards = room.tableCards.filter(
+    (played) =>
+      played.card?.suit === leadSuit
   );
 
-  if (!validCards.length) {
+  if (!leadSuitCards.length) {
     return null;
   }
 
-  let winningPlayedCard = validCards[0];
+  let winningPlayedCard = leadSuitCards[0];
 
-  for (let i = 1; i < validCards.length; i++) {
-    const currentPlayedCard = validCards[i];
+  for (let i = 1; i < leadSuitCards.length; i++) {
+    const currentPlayedCard = leadSuitCards[i];
 
     if (
       cardValue(currentPlayedCard.card) >
@@ -624,7 +608,10 @@ export const handlePlayCard = (
 
     const isThulla =
       !isFirstTrick &&
-      playedCard.suit !== room.leadSuit;
+      room.tableCards.some(
+        (played) =>
+          played.card?.suit !== room.leadSuit
+      );
 
     // ======================================
     // CHECK NORMAL TRICK COMPLETE
@@ -642,6 +629,22 @@ export const handlePlayCard = (
       isThulla ||
       isNormalTrickComplete
     ) {
+      const thullaWinner =
+        isThulla ? findTrickWinner(room) : null;
+
+      if (thullaWinner) {
+        io.to(roomId).emit("thulla", {
+          roomId,
+          leadSuit: room.leadSuit,
+          winner: {
+            userId: thullaWinner.userId,
+            name: thullaWinner.name,
+            seat: thullaWinner.seat,
+          },
+          cards: room.tableCards,
+        });
+      }
+
       console.log(
         `Trick resolution started | Room: ${roomId} | Thulla: ${isThulla}`
       );
