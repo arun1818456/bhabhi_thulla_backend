@@ -3,6 +3,7 @@ import matchLobbies from "../../data/match_lobbies.js";
 import matchmakingQueue from "../../data/matchmaking_queue.js";
 import rooms from "../../data/match_rooms.js";
 import { createDeck, shuffleDeck } from "../../game/cards.js";
+import User from "../../modules/user/model.js";
 
 const MIN_PLAYERS = 4;
 const MAX_PLAYERS = 8;
@@ -722,6 +723,7 @@ const createGameRoom = async (
                 avatar,
                 flag,
                 level,
+                cards,
             }) => ({
                 userId,
                 name,
@@ -729,6 +731,7 @@ const createGameRoom = async (
                 avatar,
                 flag,
                 level,
+                cardCount: cards.length,
             })
         );
 
@@ -765,6 +768,14 @@ const createGameRoom = async (
         console.log(
             `[MATCH] ${player.userId} joined room ${roomId}`
         );
+
+        // Deduct entry fee
+        if (entryFee > 0) {
+            User.updateOne(
+                { _id: player.userId },
+                { $inc: { coins: -entryFee } }
+            ).catch(err => console.error("Coin deduct err:", err));
+        }
 
         /**
          * Send match_started directly
@@ -858,622 +869,78 @@ const createGameRoom = async (
 /**
  * MAIN FIND MATCH HANDLER
  */
-export const handleFindMatch = async (
-    io,
-    socket,
-    matchData
-) => {
+export const handleFindMatch = async (io, socket, matchData) => {
     const socketId = socket.id;
 
-    /**
-     * Prevent same socket from starting
-     * matchmaking multiple times simultaneously.
-     */
-    if (
-        matchmakingLocks.has(socketId)
-    ) {
-        socket.emit(
-            "match_error",
-            {
-                type:
-                    "MATCHMAKING_ALREADY_RUNNING",
-
-                message:
-                    "Matchmaking request is already being processed",
-            }
-        );
-
+    if (matchmakingLocks.has(socketId)) {
+        socket.emit("match_error", {
+            type: "MATCHMAKING_ALREADY_RUNNING",
+            message: "Matchmaking request is already being processed",
+        });
         return;
     }
-
-    matchmakingLocks.add(
-        socketId
-    );
+    matchmakingLocks.add(socketId);
 
     try {
-        /**
-         * =========================
-         * FIND USER
-         * =========================
-         */
-        const userEntry =
-            [...onlineUsers.entries()]
-                .find(
-                    ([, player]) =>
-                        player.socketId ===
-                        socket.id
-                );
-
-        const userId =
-            userEntry?.[0];
+        const userEntry = [...onlineUsers.entries()].find(
+            ([, player]) => player.socketId === socket.id
+        );
+        const userId = userEntry?.[0];
 
         if (!userId) {
-            socket.emit(
-                "match_error",
-                {
-                    type:
-                        "USER_NOT_FOUND",
-
-                    message:
-                        "User not found",
-                }
-            );
-
+            socket.emit("match_error", { type: "USER_NOT_FOUND", message: "User not found" });
             return;
         }
 
-        /**
-         * =========================
-         * FIND LOBBY
-         * =========================
-         */
-        let lobby =
-            [...matchLobbies.values()]
-                .find((lobby) =>
-                    lobby.players.some(
-                        (player) =>
-                            player.userId ===
-                            userId
-                    )
-                );
+        let lobby = [...matchLobbies.values()].find((lobby) =>
+            lobby.players.some((player) => player.userId === userId)
+        );
 
         if (!lobby) {
-            socket.emit(
-                "match_error",
-                {
-                    type:
-                        "LOBBY_NOT_FOUND",
-
-                    message:
-                        "You are not in a lobby",
-                }
-            );
-
+            socket.emit("match_error", { type: "LOBBY_NOT_FOUND", message: "You are not in a lobby" });
             return;
         }
 
-        /**
-         * =========================
-         * SYNC PLAYERS
-         * =========================
-         */
-        syncLobbyPlayersFromSocketRoom(
-            io,
-            lobby
-        );
+        syncLobbyPlayersFromSocketRoom(io, lobby);
+        normalizeLobbyPlayers(lobby);
 
-        normalizeLobbyPlayers(
-            lobby
-        );
+        const entryFee = Number.isFinite(Number(matchData?.entryFee))
+            ? Number(matchData.entryFee)
+            : Number(lobby.entryFee);
 
-        /**
-         * =========================
-         * MATCH DATA
-         * =========================
-         */
-        const entryFee =
-            Number.isFinite(
-                Number(
-                    matchData?.entryFee
-                )
-            )
-                ? Number(
-                      matchData.entryFee
-                  )
-                : Number(
-                      lobby.entryFee
-                  );
-
-        const playersCount =
-            Number.isInteger(
-                Number(
-                    matchData?.playersCount
-                )
-            )
-                ? Number(
-                      matchData.playersCount
-                  )
-                : Number(
-                      lobby.playersCount ||
-                      lobby.players.length ||
-                      MIN_PLAYERS
-                  );
-
-        /**
-         * =========================
-         * VALIDATION
-         * =========================
-         */
-        if (
-            !Number.isFinite(entryFee) ||
-            entryFee < 0
-        ) {
-            socket.emit(
-                "match_error",
-                {
-                    type:
-                        "INVALID_ENTRY_FEE",
-
-                    message:
-                        "Invalid entry fee",
-                }
-            );
-
+        if (!Number.isFinite(entryFee) || entryFee < 0) {
+            socket.emit("match_error", { type: "INVALID_ENTRY_FEE", message: "Invalid entry fee" });
             return;
         }
 
-        if (
-            !Number.isInteger(
-                playersCount
-            ) ||
-            playersCount <
-                MIN_PLAYERS ||
-            playersCount >
-                MAX_PLAYERS
-        ) {
-            socket.emit(
-                "match_error",
-                {
-                    type:
-                        "INVALID_PLAYERS_COUNT",
-
-                    message:
-                        "Players count must be between 4 and 8",
-                }
-            );
-
+        if (lobby.ownerId !== userId) {
+            socket.emit("match_error", { type: "NOT_LOBBY_OWNER", message: "Only lobby owner can start the match" });
             return;
         }
 
-        /**
-         * =========================
-         * ONLY OWNER
-         * =========================
-         */
-        if (
-            lobby.ownerId !==
-            userId
-        ) {
-            socket.emit(
-                "match_error",
-                {
-                    type:
-                        "NOT_LOBBY_OWNER",
-
-                    message:
-                        "Only lobby owner can find a match",
-                }
-            );
-
-            return;
+        // As requested by user: start game immediately with whoever is in the lobby
+        const actualPlayersCount = lobby.players.length;
+        if (actualPlayersCount < 2) {
+             socket.emit("match_error", { type: "NOT_ENOUGH_PLAYERS", message: "At least 2 players required to play" });
+             return;
         }
 
-        /**
-         * =========================
-         * LOBBY STATUS
-         * =========================
-         */
-        if (
-            lobby.status !==
-                "waiting" &&
-            lobby.status !==
-                "searching"
-        ) {
-            socket.emit(
-                "match_error",
-                {
-                    type:
-                        "INVALID_LOBBY_STATUS",
+        removeLobbyFromAllQueues(lobby.lobbyId);
+        matchLobbies.delete(lobby.lobbyId);
 
-                    message:
-                        "Lobby is already started",
-                }
-            );
+        // CREATE GAME ROOM DIRECTLY WITH LOBBY PLAYERS
+        const room = await createGameRoom(io, lobby, actualPlayersCount, entryFee);
+        
+        // Start turn timer
+        import('./playCard.js').then(({ startTurnTimer }) => {
+             startTurnTimer(io, room.roomId);
+        });
 
-            return;
-        }
-
-        /**
-         * =========================
-         * ENTRY FEE CHECK
-         * =========================
-         */
-        if (
-            Number(lobby.entryFee) !==
-            entryFee
-        ) {
-            socket.emit(
-                "match_error",
-                {
-                    type:
-                        "ENTRY_FEE_MISMATCH",
-
-                    message:
-                        "Entry fee does not match lobby",
-                }
-            );
-
-            return;
-        }
-
-        /**
-         * =========================
-         * PLAYER COUNT CHECK
-         * =========================
-         */
-        if (
-            lobby.players.length >
-            playersCount
-        ) {
-            socket.emit(
-                "match_error",
-                {
-                    type:
-                        "TOO_MANY_PLAYERS",
-
-                    message:
-                        "Lobby has more players than selected match size",
-                }
-            );
-
-            return;
-        }
-
-        /**
-         * =========================
-         * IMPORTANT
-         * =========================
-         *
-         * We do NOT return after merge.
-         *
-         * We keep processing matchmaking.
-         */
-        lobby.status =
-            "searching";
-
-        /**
-         * Add current lobby to queue.
-         */
-        let queue =
-            addLobbyToQueue(
-                lobby,
-                playersCount,
-                entryFee
-            );
-
-        /**
-         * =========================
-         * MERGE COMPATIBLE LOBBIES
-         * =========================
-         *
-         * Keep merging until no compatible
-         * lobby is found.
-         */
-        let mergeCount = 0;
-
-        while (
-            lobby &&
-            lobby.players.length <
-                playersCount
-        ) {
-            const mergedLobby =
-                mergeLobbyIntoExistingSearchingLobby(
-                    io,
-                    lobby,
-                    playersCount,
-                    entryFee
-                );
-
-            if (!mergedLobby) {
-                break;
-            }
-
-            lobby =
-                mergedLobby;
-
-            mergeCount++;
-
-            /**
-             * Rebuild queue because
-             * lobby may have changed.
-             */
-            queue =
-                addLobbyToQueue(
-                    lobby,
-                    playersCount,
-                    entryFee
-                );
-
-            /**
-             * Safety.
-             */
-            if (
-                mergeCount >
-                playersCount
-            ) {
-                break;
-            }
-        }
-
-        /**
-         * =========================
-         * REFRESH QUEUE
-         * =========================
-         */
-        const queueKey =
-            `${entryFee}_${playersCount}`;
-
-        queue =
-            matchmakingQueue.get(
-                queueKey
-            ) || [];
-
-        /**
-         * Update queue player counts
-         * from actual lobby state.
-         */
-        for (
-            const item of queue
-        ) {
-            const queuedLobby =
-                matchLobbies.get(
-                    item.lobbyId
-                );
-
-            if (!queuedLobby) {
-                continue;
-            }
-
-            syncLobbyPlayersFromSocketRoom(
-                io,
-                queuedLobby
-            );
-
-            normalizeLobbyPlayers(
-                queuedLobby
-            );
-
-            item.playersCount =
-                queuedLobby.players.length;
-        }
-
-        /**
-         * Remove stale queue items.
-         */
-        const validQueue =
-            queue.filter(
-                (item) =>
-                    matchLobbies.has(
-                        item.lobbyId
-                    ) &&
-                    item.playersCount >
-                        0
-            );
-
-        matchmakingQueue.set(
-            queueKey,
-            validQueue
-        );
-
-        queue =
-            validQueue;
-
-        /**
-         * =========================
-         * SEND SEARCHING STATE
-         * =========================
-         */
-        if (
-            lobby &&
-            lobby.status ===
-                "searching"
-        ) {
-            broadcastLobbySearchState(
-                io,
-                lobby,
-                playersCount,
-                entryFee,
-                "searching"
-            );
-        }
-
-        /**
-         * =========================
-         * SELECT LOBBIES
-         * =========================
-         */
-        const {
-            selected,
-            totalPlayers,
-        } =
-            selectLobbiesForMatch(
-                queue,
-                playersCount
-            );
-
-        console.log(
-            "================================="
-        );
-
-        console.log(
-            "[MATCHMAKING CHECK]"
-        );
-
-        console.log(
-            "Queue:",
-            queueKey
-        );
-
-        console.log(
-            "Selected:",
-            selected.map(
-                (x) => ({
-                    lobbyId:
-                        x.lobbyId,
-
-                    playersCount:
-                        x.playersCount,
-                })
-            )
-        );
-
-        console.log(
-            "Total:",
-            totalPlayers
-        );
-
-        console.log(
-            "Required:",
-            playersCount
-        );
-
-        console.log(
-            "================================="
-        );
-
-        /**
-         * =========================
-         * NOT ENOUGH PLAYERS
-         * =========================
-         */
-        if (
-            totalPlayers !==
-            playersCount
-        ) {
-            console.log(
-                `[MATCHMAKING] Waiting ${totalPlayers}/${playersCount}`
-            );
-
-            return;
-        }
-
-        /**
-         * =========================
-         * REMOVE SELECTED LOBBIES
-         * =========================
-         */
-        for (
-            const selectedLobby of selected
-        ) {
-            removeLobbyFromAllQueues(
-                selectedLobby.lobbyId
-            );
-        }
-
-        /**
-         * =========================
-         * MERGE SELECTED LOBBIES
-         * =========================
-         */
-        const primaryLobby =
-            mergeSelectedLobbiesIntoPrimary(
-                io,
-                selected
-            );
-
-        if (!primaryLobby) {
-            throw new Error(
-                "Unable to create primary lobby"
-            );
-        }
-
-        /**
-         * =========================
-         * FINAL SYNC
-         * =========================
-         */
-        syncLobbyPlayersFromSocketRoom(
-            io,
-            primaryLobby
-        );
-
-        normalizeLobbyPlayers(
-            primaryLobby
-        );
-
-        /**
-         * FINAL SAFETY CHECK
-         */
-        if (
-            primaryLobby.players.length !==
-            playersCount
-        ) {
-            console.error(
-                "[MATCHMAKING] FINAL PLAYER COUNT MISMATCH",
-                {
-                    expected:
-                        playersCount,
-
-                    actual:
-                        primaryLobby.players
-                            .length,
-
-                    players:
-                        primaryLobby.players,
-                }
-            );
-
-            primaryLobby.status =
-                "searching";
-
-            return;
-        }
-
-        /**
-         * =========================
-         * CREATE GAME ROOM
-         * =========================
-         */
-        const room =
-            await createGameRoom(
-                io,
-                primaryLobby,
-                playersCount,
-                entryFee
-            );
-
-        console.log(
-            `[MATCHMAKING] SUCCESS: Room ${room.roomId} created`
-        );
+        console.log(`[MATCHMAKING] SUCCESS: Room ${room.roomId} started directly by owner`);
     } catch (error) {
-        console.error(
-            "[handleFindMatch] error:",
-            error
-        );
-
-        socket.emit(
-            "match_error",
-            {
-                type:
-                    "SERVER_ERROR",
-
-                message:
-                    "Something went wrong",
-            }
-        );
+        console.error("[handleFindMatch] error:", error);
+        socket.emit("match_error", { type: "SERVER_ERROR", message: "Something went wrong" });
     } finally {
-        matchmakingLocks.delete(
-            socketId
-        );
+        matchmakingLocks.delete(socketId);
     }
 };

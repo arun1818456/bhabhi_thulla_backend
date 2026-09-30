@@ -1,4 +1,6 @@
 import rooms from "../../data/match_rooms.js";
+import onlinePlayers from "../../data/online_players.js";
+import User from "../../modules/user/model.js";
 
 const TRICK_RESOLUTION_DELAY = 1500;
 
@@ -44,11 +46,21 @@ const emitGameError = (socket, type, message) => {
 // ==========================================
 
 const nextSeat = (room, seat) => {
-  if (seat >= room.playersCount) {
-    return 1;
-  }
+  let next = seat;
+  let attempts = 0;
 
-  return seat + 1;
+  do {
+    next = next >= room.playersCount ? 1 : next + 1;
+    attempts++;
+
+    const p = room.players.find((player) => player.seat === next);
+    if (p && p.cards.length > 0) {
+      return next;
+    }
+  } while (attempts < room.playersCount);
+
+  // Fallback
+  return seat >= room.playersCount ? 1 : seat + 1;
 };
 
 // ==========================================
@@ -115,10 +127,34 @@ const findTrickWinner = (room) => {
 };
 
 // ==========================================
+// SYNC HANDS HELPER
+// ==========================================
+
+const syncAllHands = (io, roomId) => {
+  const room = rooms.get(roomId);
+  if (!room) return;
+
+  room.players.forEach(p => {
+    // Refresh socketId from onlinePlayers in case of reconnection
+    const onlinePlayer = onlinePlayers.get(p.userId);
+    if (onlinePlayer && onlinePlayer.socketId) {
+      p.socketId = onlinePlayer.socketId;
+    }
+    const s = io.sockets.sockets.get(p.socketId);
+    if (s) {
+      s.emit("your_cards", {
+        roomId: room.roomId,
+        cards: p.cards,
+      });
+    }
+  });
+};
+
+// ==========================================
 // RESOLVE TRICK
 // ==========================================
 
-const resolveTrick = (io, roomId) => {
+const resolveTrick = (io, roomId, isThulla) => {
   const room = rooms.get(roomId);
 
   if (!room) {
@@ -152,7 +188,7 @@ const resolveTrick = (io, roomId) => {
   // WAIT 1.5 SECOND
   // ----------------------------------------
 
-  setTimeout(() => {
+  setTimeout(async () => {
     const currentRoom = rooms.get(roomId);
 
     if (!currentRoom) {
@@ -191,10 +227,12 @@ const resolveTrick = (io, roomId) => {
       );
 
     // --------------------------------------
-    // ALL TABLE CARDS GO TO WINNER
+    // ALL TABLE CARDS GO TO WINNER OR DISCARD
     // --------------------------------------
 
-    winner.cards.push(...collectedCards);
+    if (isThulla) {
+      winner.cards.push(...collectedCards);
+    }
 
     // --------------------------------------
     // CLEAR TABLE
@@ -218,11 +256,76 @@ const resolveTrick = (io, roomId) => {
     // WINNER GETS NEXT TURN
     // --------------------------------------
 
-    currentRoom.currentTurn = winner.seat;
+    if (winner.cards.length === 0) {
+      currentRoom.currentTurn = nextSeat(currentRoom, winner.seat);
+    } else {
+      currentRoom.currentTurn = winner.seat;
+    }
 
     currentRoom.resolving = false;
 
+    // Track finished ranks
+    if (!currentRoom.finishedRanks) currentRoom.finishedRanks = [];
+
+    currentRoom.players.forEach(p => {
+      if (p.cards.length === 0 && !currentRoom.finishedRanks.some(f => f.userId === p.userId)) {
+        currentRoom.finishedRanks.push({
+          userId: p.userId,
+          name: p.name,
+          seat: p.seat,
+          rank: currentRoom.finishedRanks.length + 1
+        });
+      }
+    });
+
     rooms.set(roomId, currentRoom);
+
+    // --------------------------------------
+    // GAME OVER CHECK
+    // --------------------------------------
+    const activePlayers = currentRoom.players.filter(p => p.cards.length > 0);
+    
+    if (activePlayers.length <= 1 && currentRoom.playersCount > 1) {
+      // The remaining active player is Bhabhi (loser)
+      const bhabhiPlayer = activePlayers[0];
+      if (bhabhiPlayer && !currentRoom.finishedRanks.some(f => f.userId === bhabhiPlayer.userId)) {
+        currentRoom.finishedRanks.push({
+           userId: bhabhiPlayer.userId,
+           name: bhabhiPlayer.name,
+           seat: bhabhiPlayer.seat,
+           rank: currentRoom.playersCount, // Last rank
+           isBhabhi: true
+        });
+      }
+
+      // Calculate prize based on entry fee
+      const PRIZES = { 120: 160, 300: 380, 600: 760, 1200: 1500, 2500: 3200, 5200: 6500 };
+      const prizeAmount = PRIZES[currentRoom.entryFee] || Math.floor((currentRoom.entryFee * currentRoom.playersCount) / (currentRoom.playersCount - 1));
+
+      // Award prize to winners (anyone who is not Bhabhi)
+      const winners = currentRoom.finishedRanks.filter(f => !f.isBhabhi);
+      for (const w of winners) {
+         try {
+            await User.updateOne({ _id: w.userId }, { $inc: { coins: prizeAmount } });
+         } catch(e) {
+            console.error("Coin award failed", e);
+         }
+      }
+
+      // Sync final state
+      syncAllHands(io, roomId);
+      
+      io.to(roomId).emit("game_over", {
+         roomId,
+         ranks: currentRoom.finishedRanks,
+         prizeAmount
+      });
+      
+      // Clear interval if any
+      if (currentRoom.turnTimer) clearTimeout(currentRoom.turnTimer);
+      rooms.delete(roomId);
+      return;
+    }
 
     // --------------------------------------
     // TABLE CLEARED
@@ -242,41 +345,97 @@ const resolveTrick = (io, roomId) => {
     });
 
     // --------------------------------------
-    // SEND UPDATED WINNER HAND
+    // SEND UPDATED HANDS TO ALL PLAYERS
     // --------------------------------------
 
-    /*
-     * Winner received table cards.
-     *
-     * Only winner should receive
-     * his updated hand.
-     */
-
-    const winnerSocket =
-      io.sockets.sockets.get(
-        winner.socketId
-      );
-
-    if (winnerSocket) {
-      winnerSocket.emit("your_cards", {
-        roomId,
-        cards: winner.cards,
-      });
-    }
+    syncAllHands(io, roomId);
 
     // --------------------------------------
     // TURN CHANGED
     // --------------------------------------
 
+    const counts = {};
+    currentRoom.players.forEach(p => counts[p.userId] = p.cards.length);
+
     io.to(roomId).emit("turn_changed", {
       roomId,
       currentTurn: currentRoom.currentTurn,
+      playerCardCounts: counts,
     });
+
+    startTurnTimer(io, roomId);
 
     console.log(
       `Trick resolved in room ${roomId}. Winner: ${winner.userId}, seat: ${winner.seat}`
     );
   }, TRICK_RESOLUTION_DELAY);
+};
+
+// ==========================================
+// TIMER AND AUTO-PLAY
+// ==========================================
+
+export const startTurnTimer = (io, roomId) => {
+  const room = rooms.get(roomId);
+  if (!room) return;
+
+  if (room.turnTimer) {
+    clearTimeout(room.turnTimer);
+  }
+
+  // 40 seconds timer
+  room.turnTimer = setTimeout(() => {
+    autoPlayCard(io, roomId);
+  }, 40000);
+};
+
+const autoPlayCard = (io, roomId) => {
+  const room = rooms.get(roomId);
+  if (!room || room.status !== "started" || room.resolving) return;
+
+  const player = room.players.find(p => p.seat === room.currentTurn);
+  if (!player || player.cards.length === 0) {
+     // If player has no cards, maybe skip? But usually winner logic handles getting away.
+     // Assuming player has cards.
+     return;
+  }
+
+  const trickNumber = room.trickNumber || 1;
+  const isFirstTrick = trickNumber === 1;
+  const isFirstCard = (room.tableCards || []).length === 0;
+  let selectedCard = null;
+
+  if (isFirstTrick && isFirstCard) {
+    const aceOfSpades = player.cards.find(c => sameCard(c, ACE_OF_SPADES));
+    if (aceOfSpades) selectedCard = aceOfSpades;
+  } else if (!isFirstTrick && room.leadSuit) {
+    const validCards = player.cards.filter(c => c.suit === room.leadSuit);
+    if (validCards.length > 0) {
+      selectedCard = validCards[0]; // pick lowest or any
+    }
+  } else if (isFirstTrick && !isFirstCard) {
+    const validCards = player.cards.filter(c => c.suit === "spades");
+    if (validCards.length > 0) {
+      selectedCard = validCards[0];
+    }
+  }
+
+  // If no specific card required or found, pick the first one
+  if (!selectedCard) {
+    selectedCard = player.cards[0];
+  }
+
+  console.log(`[AUTO-PLAY] Time up for ${player.userId}, auto-playing ${selectedCard.rank} of ${selectedCard.suit}`);
+
+  // Create a mock socket to pass to handlePlayCard
+  const mockSocket = {
+    id: player.socketId,
+    emit: (event, data) => {
+        console.log(`[AUTO-PLAY ERROR] ${event}: ${data?.message}`);
+    }
+  };
+
+  handlePlayCard(io, mockSocket, { roomId, card: selectedCard });
 };
 
 // ==========================================
@@ -354,14 +513,10 @@ export const handlePlayCard = (
     }
 
     // ======================================
-    // PLAYERS COUNT
+    // PLAYERS COUNT (Allow any number for testing)
     // ======================================
 
-    if (
-      !Number.isInteger(room.playersCount) ||
-      room.playersCount < 4 ||
-      room.playersCount > 8
-    ) {
+    if (!Number.isInteger(room.playersCount)) {
       emitGameError(
         socket,
         "INVALID_PLAYERS_COUNT",
@@ -416,6 +571,12 @@ export const handlePlayCard = (
       );
 
       return;
+    }
+
+    // Turn is valid, clear the auto-play timer
+    if (room.turnTimer) {
+      clearTimeout(room.turnTimer);
+      room.turnTimer = null;
     }
 
     // ======================================
@@ -593,6 +754,11 @@ export const handlePlayCard = (
     );
 
     // ======================================
+    // SYNC HANDS
+    // ======================================
+    syncAllHands(io, roomId);
+
+    // ======================================
     // CHECK THULLA
     // ======================================
 
@@ -617,9 +783,12 @@ export const handlePlayCard = (
     // CHECK NORMAL TRICK COMPLETE
     // ======================================
 
+    const activePlayersInTrickCount = room.players.filter(
+      p => p.cards.length > 0 || room.tableCards.some(tc => tc.seat === p.seat)
+    ).length;
+
     const isNormalTrickComplete =
-      room.tableCards.length ===
-      room.playersCount;
+      room.tableCards.length >= activePlayersInTrickCount;
 
     // ======================================
     // THULLA OR COMPLETE TRICK
@@ -651,7 +820,8 @@ export const handlePlayCard = (
 
       resolveTrick(
         io,
-        roomId
+        roomId,
+        isThulla
       );
 
       return;
@@ -672,14 +842,20 @@ export const handlePlayCard = (
       room
     );
 
+    const counts = {};
+    room.players.forEach(p => counts[p.userId] = p.cards.length);
+
     io.to(roomId).emit(
       "turn_changed",
       {
         roomId,
         currentTurn:
           room.currentTurn,
+        playerCardCounts: counts,
       }
     );
+
+    startTurnTimer(io, roomId);
 
   } catch (error) {
     console.error(
