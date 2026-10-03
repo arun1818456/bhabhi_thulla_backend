@@ -89,6 +89,18 @@ const userSchema = new mongoose.Schema({
         type: Date,
         default: Date.now,
     },
+    lastSpinAt: {
+        type: Date,
+        default: null,
+    },
+    totalSpins: {
+        type: Number,
+        default: 0,
+    },
+    dailySpinCount: {
+        type: Number,
+        default: 0,
+    },
 
 }, {
     versionKey: false,

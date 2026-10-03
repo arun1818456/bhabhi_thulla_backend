@@ -11,6 +11,11 @@ import {
 	removeFriend
 } from './controller.js';
 
+import {
+	getSpinStatus,
+	playSpin
+} from './spinController.js';
+
 const router = express.Router();
 
 router.post("/guest", guestLogin);
@@ -21,4 +26,9 @@ router.post("/rejectRequest", auth, rejectRequest);
 router.get("/connections", auth, getConnections);
 router.delete("/removeFriend/:userId", auth, removeFriend);
 
-export default router;    
+// Spin & Win APIs
+router.get("/spin/status", auth, getSpinStatus);
+router.post("/spin/play", auth, playSpin);
+
+export default router;
+    
