@@ -93,10 +93,6 @@ const userSchema = new mongoose.Schema({
         type: Date,
         default: null,
     },
-    totalSpins: {
-        type: Number,
-        default: 0,
-    },
     dailySpinCount: {
         type: Number,
         default: 0,

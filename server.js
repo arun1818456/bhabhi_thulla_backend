@@ -24,6 +24,7 @@ import  connectDB  from "./app/config/dbConnect.js";
 
 // Routes
 import userRoutes from "./app/modules/user/routes.js";
+import spinnerRoutes from "./app/modules/spinner/routes.js";
 
 // Socket.IO
 import { initSocketIO } from "./app/socket/socket_io.js";
@@ -68,7 +69,7 @@ await connectDB();
 // POST /api/auth/register
 
 app.use("/api/user", userRoutes);
-
+app.use("/api/spin", spinnerRoutes);
 
 // ============================================================
 // HEALTH CHECK API
